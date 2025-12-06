@@ -79,7 +79,7 @@ jobs:
                   VERSION: ${{ env.VERSION }}
               run: |
                   cd release
-                  sha256sum apex-${VERSION}-linux-*.tar.gz > apex-${VERSION}-linux-$$(uname -m).tar.gz.sha256
+                  sha256sum apex-${VERSION}-linux-*.tar.gz > apex-${VERSION}-linux-$(uname -m).tar.gz.sha256
                   cat apex-${VERSION}-linux-*.tar.gz.sha256
 
             - name: Upload Linux release
