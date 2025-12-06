@@ -62,6 +62,7 @@ jobs:
                   echo "VERSION=$VERSION" >> $GITHUB_ENV
                   echo "version=$VERSION" >> $GITHUB_OUTPUT
                   echo "Version: $VERSION"
+                  echo "$VERSION" > VERSION
 
             - name: Build Linux binary
               env:

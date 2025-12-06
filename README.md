@@ -19,6 +19,7 @@ Apex is a unified Markdown processor that combines the best features from Common
 ```bash
 git clone https://github.com/ttscoff/apex.git
 cd apex
+git submodule update --init --recursive
 cmake -S . -B build
 cmake --build build
 ```
