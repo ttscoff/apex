@@ -43,3 +43,4 @@ build/**/*.make
 # Note: vendor/ directory contains git submodules and should be tracked
 .bundle/
 release/
+build-release/
