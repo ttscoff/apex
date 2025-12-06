@@ -39,3 +39,4 @@ Makefile
 # Package managers
 vendor/
 .bundle/
+release/

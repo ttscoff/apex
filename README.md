@@ -19,12 +19,13 @@ Apex is a unified Markdown processor that combines the best features from Common
 ```bash
 git clone https://github.com/ttscoff/apex.git
 cd apex
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build
+cmake --build build
 ```
 
 The `apex` binary will be in the `build/` directory.
+
+**Note:** You must run `cmake -S . -B build` first to configure the project and generate the build cache. Then use `cmake --build build` to compile. If you get a "could not load cache" error, it means the configuration step hasn't been run yet.
 
 ## Basic Usage
 

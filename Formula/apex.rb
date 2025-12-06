@@ -38,7 +38,7 @@ class Apex < Formula
   test do
     # Test basic functionality
     (testpath/"test.md").write("# Hello World\n")
-    assert_match "<h1>Hello World</h1>", shell_output("#{bin}/apex test.md")
+    assert_match "<h1 id=\"hello-world\">Hello World</h1>", shell_output("#{bin}/apex test.md")
 
     # Test version
     assert_match version.to_s, shell_output("#{bin}/apex --version", 2)
