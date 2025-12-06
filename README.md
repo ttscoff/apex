@@ -14,6 +14,13 @@ Apex is a unified Markdown processor that combines the best features from Common
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap ttscoff/thelab
+brew install ttscoff/thelab/apex
+```
+
 ### Building from Source
 
 ```bash
