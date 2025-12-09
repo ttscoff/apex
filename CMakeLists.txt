@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(apex VERSION 0.1.18 LANGUAGES C)
+project(apex VERSION 0.1.19 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
