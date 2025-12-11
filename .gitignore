@@ -1,4 +1,6 @@
 # Build directories
+commit_message.txt
+tag_message.txt
 build/
 cmake-build-*/
 *.xcodeproj/xcuserdata/
