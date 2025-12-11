@@ -170,6 +170,38 @@ static char *apex_preprocess_autolinks(const char *text, const apex_options *opt
 
     while (*r) {
         const char *loop_start = r;
+
+        /* Check if we're at the start of a reference link definition: [id]: URL */
+        if (r == text || r[-1] == '\n') {
+            const char *line_start = r;
+            /* Skip leading whitespace */
+            while (*line_start == ' ' || *line_start == '\t') {
+                line_start++;
+            }
+            /* Check for [id]: pattern */
+            if (*line_start == '[') {
+                const char *id_end = strchr(line_start + 1, ']');
+                if (id_end && id_end[1] == ':') {
+                    /* This is a reference link definition - skip autolinking for this line */
+                    const char *line_end = strchr(r, '\n');
+                    if (!line_end) line_end = r + strlen(r);
+                    /* Copy the entire line without processing */
+                    size_t line_len = line_end - r;
+                    if ((size_t)(w - out) + line_len + 1 > cap) {
+                        size_t used = (size_t)(w - out);
+                        cap = (used + line_len + 1) * 2;
+                        char *new_out = realloc(out, cap);
+                        if (!new_out) { free(out); return NULL; }
+                        out = new_out;
+                        w = out + used;
+                    }
+                    memcpy(w, r, line_len);
+                    w += line_len;
+                    r = line_end;
+                    continue;
+                }
+            }
+        }
         /* Track code blocks (```...```) */
         if (*r == '`') {
             int backtick_count = 1;
