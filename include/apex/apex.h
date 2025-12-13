@@ -130,9 +130,12 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
  * @param content HTML content to wrap
  * @param title Document title (NULL for default)
  * @param stylesheet_path Path to CSS file to link (NULL for none)
+ * @param html_header Raw HTML to insert in <head> section (NULL for none)
+ * @param html_footer Raw HTML to append before </body> (NULL for none)
+ * @param language Language code for <html lang> attribute (NULL for "en")
  * @return Newly allocated HTML document string (must be freed with apex_free_string)
  */
-char *apex_wrap_html_document(const char *content, const char *title, const char *stylesheet_path);
+char *apex_wrap_html_document(const char *content, const char *title, const char *stylesheet_path, const char *html_header, const char *html_footer, const char *language);
 
 /**
  * Pretty-print HTML with proper indentation

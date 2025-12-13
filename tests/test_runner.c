@@ -148,6 +148,109 @@ static void test_metadata(void) {
 }
 
 /**
+ * Test MultiMarkdown metadata keys
+ */
+static void test_mmd_metadata_keys(void) {
+    printf("\n=== MultiMarkdown Metadata Keys Tests ===\n");
+
+    apex_options opts = apex_options_for_mode(APEX_MODE_MULTIMARKDOWN);
+    char *html;
+
+    /* Test Base Header Level */
+    const char *base_header_doc = "Base Header Level: 2\n\n# Header 1\n## Header 2";
+    html = apex_markdown_to_html(base_header_doc, strlen(base_header_doc), &opts);
+    assert_contains(html, "<h2", "Base Header Level: h1 becomes h2");
+    assert_contains(html, "Header 1</h2>", "Base Header Level: h1 content in h2 tag");
+    assert_contains(html, "<h3", "Base Header Level: h2 becomes h3");
+    assert_contains(html, "Header 2</h3>", "Base Header Level: h2 content in h3 tag");
+    apex_free_string(html);
+
+    /* Test HTML Header Level (format-specific) */
+    const char *html_header_level_doc = "HTML Header Level: 3\n\n# Header 1";
+    html = apex_markdown_to_html(html_header_level_doc, strlen(html_header_level_doc), &opts);
+    assert_contains(html, "<h3", "HTML Header Level: h1 becomes h3");
+    assert_contains(html, "Header 1</h3>", "HTML Header Level: h1 content in h3 tag");
+    apex_free_string(html);
+
+    /* Test Language metadata in standalone document */
+    opts.standalone = true;
+    const char *language_doc = "Language: fr\n\n# Bonjour";
+    html = apex_markdown_to_html(language_doc, strlen(language_doc), &opts);
+    assert_contains(html, "<html lang=\"fr\">", "Language metadata sets HTML lang attribute");
+    apex_free_string(html);
+
+    /* Test Quotes Language - French (requires smart typography) */
+    opts.standalone = false;
+    opts.enable_smart_typography = true;  /* Ensure smart typography is enabled */
+    const char *quotes_fr_doc = "Quotes Language: french\n\nHe said \"hello\" to me.";
+    html = apex_markdown_to_html(quotes_fr_doc, strlen(quotes_fr_doc), &opts);
+    assert_contains(html, "&laquo;&nbsp;", "Quotes Language: French opening quote");
+    assert_contains(html, "&nbsp;&raquo;", "Quotes Language: French closing quote");
+    apex_free_string(html);
+
+    /* Test Quotes Language - German */
+    const char *quotes_de_doc = "Quotes Language: german\n\nHe said \"hello\" to me.";
+    html = apex_markdown_to_html(quotes_de_doc, strlen(quotes_de_doc), &opts);
+    assert_contains(html, "&bdquo;", "Quotes Language: German opening quote");
+    assert_contains(html, "&ldquo;", "Quotes Language: German closing quote");
+    apex_free_string(html);
+
+    /* Test Quotes Language fallback to Language */
+    opts.standalone = true;
+    const char *lang_fallback_doc = "Language: fr\n\nHe said \"hello\" to me.";
+    html = apex_markdown_to_html(lang_fallback_doc, strlen(lang_fallback_doc), &opts);
+    assert_contains(html, "<html lang=\"fr\">", "Language metadata sets HTML lang");
+    /* Quotes should also use French since Quotes Language not specified */
+    assert_contains(html, "&laquo;&nbsp;", "Quotes Language falls back to Language");
+    apex_free_string(html);
+
+    /* Test CSS metadata in standalone document */
+    opts.standalone = true;
+    const char *css_doc = "CSS: styles.css\n\n# Test";
+    html = apex_markdown_to_html(css_doc, strlen(css_doc), &opts);
+    assert_contains(html, "<link rel=\"stylesheet\" href=\"styles.css\">", "CSS metadata adds stylesheet link");
+    assert_not_contains(html, "<style>", "CSS metadata: no default styles when CSS specified");
+    apex_free_string(html);
+
+    /* Test CSS metadata: default styles when no CSS */
+    const char *no_css_doc = "Title: Test\n\n# Content";
+    html = apex_markdown_to_html(no_css_doc, strlen(no_css_doc), &opts);
+    assert_contains(html, "<style>", "No CSS metadata: default styles included");
+    apex_free_string(html);
+
+    /* Test HTML Header metadata */
+    const char *html_header_doc = "HTML Header: <script src=\"mathjax.js\"></script>\n\n# Test";
+    html = apex_markdown_to_html(html_header_doc, strlen(html_header_doc), &opts);
+    assert_contains(html, "<script src=\"mathjax.js\"></script>", "HTML Header metadata inserted in head");
+    assert_contains(html, "</head>", "HTML Header metadata before </head>");
+    apex_free_string(html);
+
+    /* Test HTML Footer metadata */
+    const char *html_footer_doc = "HTML Footer: <script>init();</script>\n\n# Test";
+    html = apex_markdown_to_html(html_footer_doc, strlen(html_footer_doc), &opts);
+    assert_contains(html, "<script>init();</script>", "HTML Footer metadata inserted before </body>");
+    assert_contains(html, "</body>", "HTML Footer metadata before </body>");
+    apex_free_string(html);
+
+    /* Test normalized key matching (spaces removed, case-insensitive) */
+    opts.standalone = false;
+    opts.enable_smart_typography = true;  /* Ensure smart typography is enabled */
+    const char *normalized_doc = "quoteslanguage: french\nbaseheaderlevel: 2\n\n# Header\nHe said \"hello\".";
+    html = apex_markdown_to_html(normalized_doc, strlen(normalized_doc), &opts);
+    assert_contains(html, "<h2", "Normalized key: baseheaderlevel works");
+    assert_contains(html, "&laquo;&nbsp;", "Normalized key: quoteslanguage works");
+    apex_free_string(html);
+
+    /* Test case-insensitive matching */
+    opts.enable_smart_typography = true;  /* Ensure smart typography is enabled */
+    const char *case_doc = "QUOTES LANGUAGE: german\nBASE HEADER LEVEL: 3\n\n# Header\nHe said \"hello\".";
+    html = apex_markdown_to_html(case_doc, strlen(case_doc), &opts);
+    assert_contains(html, "<h3", "Case-insensitive: BASE HEADER LEVEL works");
+    assert_contains(html, "&bdquo;", "Case-insensitive: QUOTES LANGUAGE works");
+    apex_free_string(html);
+}
+
+/**
  * Test metadata transforms
  */
 static void test_metadata_transforms(void) {
@@ -2717,6 +2820,7 @@ int main(int argc, char *argv[]) {
     test_gfm_features();
     test_metadata();
     test_metadata_transforms();
+    test_mmd_metadata_keys();
     test_wiki_links();
     test_math();
     test_critic_markup();

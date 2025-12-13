@@ -79,11 +79,22 @@ static char *trim_whitespace(char *str) {
  * Add a metadata item to the list
  */
 static void add_metadata_item(apex_metadata_item **list, const char *key, const char *value) {
+    if (!key || !value) return;  /* Don't add items with NULL key or value */
+
     apex_metadata_item *item = malloc(sizeof(apex_metadata_item));
     if (!item) return;
 
     item->key = strdup(key);
     item->value = strdup(value);
+
+    /* If strdup failed, free the item and don't add it */
+    if (!item->key || !item->value) {
+        free(item->key);
+        free(item->value);
+        free(item);
+        return;
+    }
+
     item->next = *list;
     *list = item;
 }
@@ -453,14 +464,76 @@ apex_metadata_item *apex_get_metadata(cmark_node *document) {
 }
 
 /**
- * Get a specific metadata value (case-insensitive)
+ * Normalize metadata key by removing spaces and converting to lowercase
+ * This matches MultiMarkdown's behavior where "HTML Header Level" becomes "htmlheaderlevel"
+ */
+static char *normalize_metadata_key(const char *key) {
+    if (!key) return NULL;
+
+    size_t len = strlen(key);
+    char *normalized = malloc(len + 1);
+    if (!normalized) return NULL;
+
+    char *out = normalized;
+    for (const char *in = key; *in; in++) {
+        if (!isspace((unsigned char)*in)) {
+            *out++ = (char)tolower((unsigned char)*in);
+        }
+    }
+    *out = '\0';
+    return normalized;
+}
+
+/**
+ * Get a specific metadata value (case-insensitive, spaces ignored)
+ * Matches MultiMarkdown behavior where "HTML Header Level" matches "htmlheaderlevel"
  */
 const char *apex_metadata_get(apex_metadata_item *metadata, const char *key) {
+    if (!key || !metadata) return NULL;
+
+    /* Validate key is a valid string (not just a non-NULL pointer) */
+    if (strlen(key) == 0) return NULL;
+
+    /* Normalize the search key */
+    char *normalized_key = normalize_metadata_key(key);
+    if (!normalized_key) return NULL;
+
+    /* Try exact case-insensitive match first (for backwards compatibility) */
     for (apex_metadata_item *item = metadata; item != NULL; item = item->next) {
+        /* Validate item and its key before using */
+        if (!item) break;
+        if (!item->key) continue;
+
+        /* Additional safety: check if key is a valid string */
+        size_t key_len = strlen(item->key);
+        if (key_len == 0) continue;
+
         if (strcasecmp(item->key, key) == 0) {
+            free(normalized_key);
             return item->value;
         }
     }
+
+    /* Try normalized match (spaces removed, lowercase) */
+    for (apex_metadata_item *item = metadata; item != NULL; item = item->next) {
+        if (!item || !item->key) continue;  /* Skip items with NULL keys */
+
+        /* Additional safety: check if key is a valid string */
+        size_t key_len = strlen(item->key);
+        if (key_len == 0) continue;
+
+        char *normalized_item_key = normalize_metadata_key(item->key);
+        if (normalized_item_key) {
+            bool match = (strcmp(normalized_item_key, normalized_key) == 0);
+            free(normalized_item_key);
+            if (match) {
+                free(normalized_key);
+                return item->value;
+            }
+        }
+    }
+
+    free(normalized_key);
     return NULL;
 }
 

@@ -870,11 +870,17 @@ char *apex_convert_relaxed_table_headers(const char *html) {
         if (remaining < 100) {
             size_t written = write - output;
             size_t new_capacity = (write - output) * 2;
+            if (new_capacity < written + 100) {
+                new_capacity = written + 1000;  /* Ensure we have enough space */
+            }
+            char *old_output = output;  /* Save old pointer */
             char *new_output = realloc(output, new_capacity);
             if (!new_output) {
-                free(output);
+                /* realloc failed - original pointer is still valid, free it */
+                free(old_output);
                 return NULL;
             }
+            /* realloc succeeded - update pointers */
             output = new_output;
             write = output + written;
             remaining = new_capacity - written;
@@ -1164,6 +1170,384 @@ char *apex_remove_table_separator_rows(const char *html) {
 
         /* Copy character */
         *write++ = *read++;
+    }
+
+    *write = '\0';
+    return output;
+}
+
+/**
+ * Adjust header levels in HTML based on Base Header Level metadata
+ * Shifts all headers by the specified offset (e.g., Base Header Level: 2 means h1->h2, h2->h3, etc.)
+ */
+char *apex_adjust_header_levels(const char *html, int base_header_level) {
+    if (!html || base_header_level <= 0 || base_header_level > 6) {
+        return html ? strdup(html) : NULL;
+    }
+
+    /* If base_header_level is 1, no adjustment needed */
+    if (base_header_level == 1) {
+        return strdup(html);
+    }
+
+    size_t len = strlen(html);
+    size_t capacity = len + 1024;  /* Extra space for potential changes */
+    char *output = malloc(capacity);
+    if (!output) return NULL;
+
+    const char *read = html;
+    char *write = output;
+    size_t remaining = capacity;
+
+    while (*read) {
+        /* Look for header opening tags: <h1>, <h2>, etc. or closing tags: </h1>, </h2>, etc. */
+        bool is_closing_tag = false;
+        int header_level = -1;
+
+        if (*read == '<') {
+            /* Check for closing tag </h1> first */
+            if (read[1] == '/' && read[2] == 'h' &&
+                read[3] >= '1' && read[3] <= '6' && read[4] == '>') {
+                is_closing_tag = true;
+                header_level = read[3] - '0';
+            }
+            /* Check for opening tag <h1> or <h1 ...> */
+            else if (read[1] == 'h' && read[2] >= '1' && read[2] <= '6' &&
+                     (read[3] == '>' || isspace((unsigned char)read[3]))) {
+                is_closing_tag = false;
+                header_level = read[2] - '0';
+            }
+        }
+
+        if (header_level >= 1 && header_level <= 6) {
+            /* Calculate new level */
+            int new_level = header_level + (base_header_level - 1);
+
+            /* Clamp to valid range (1-6) */
+            if (new_level > 6) {
+                new_level = 6;
+            } else if (new_level < 1) {
+                new_level = 1;
+            }
+
+            /* Find the end of the tag */
+            const char *tag_start = read;
+            const char *tag_end = strchr(tag_start, '>');
+            if (!tag_end) {
+                /* Malformed tag, just copy */
+                if (remaining > 0) {
+                    *write++ = *read++;
+                    remaining--;
+                } else {
+                    read++;
+                }
+                continue;
+            }
+
+            /* Check if we need to adjust the level */
+            if (new_level != header_level) {
+                /* Need to replace h<header_level> with h<new_level> */
+                size_t tag_len = tag_end - tag_start;
+
+                /* Ensure we have enough space */
+                if (remaining < tag_len + 10) {
+                    size_t written = write - output;
+                    capacity = (written + tag_len + 10) * 2;
+                    char *new_output = realloc(output, capacity);
+                    if (!new_output) {
+                        free(output);
+                        return NULL;
+                    }
+                    output = new_output;
+                    write = output + written;
+                    remaining = capacity - written;
+                }
+
+                if (is_closing_tag) {
+                    /* Closing tag: </h1> -> </h2> */
+                    *write++ = '<';
+                    *write++ = '/';
+                    *write++ = 'h';
+                    *write++ = '0' + new_level;
+                    *write++ = '>';
+                    remaining -= 5;
+                    read = tag_end + 1;
+                } else {
+                    /* Opening tag: <h1> or <h1 ...> */
+                    const char *h_pos = tag_start + 1;  /* After '<' */
+                    size_t before_h = h_pos - tag_start;
+                    memcpy(write, tag_start, before_h);
+                    write += before_h;
+                    remaining -= before_h;
+
+                    /* Write 'h' */
+                    *write++ = 'h';
+                    remaining--;
+
+                    /* Write new level */
+                    *write++ = '0' + new_level;
+                    remaining--;
+
+                    /* Copy rest of tag */
+                    const char *after_level = tag_start + 3;  /* After 'h' and level digit */
+                    size_t rest_len = tag_end - after_level;
+                    if (rest_len > 0 && remaining >= rest_len) {
+                        memcpy(write, after_level, rest_len);
+                        write += rest_len;
+                        remaining -= rest_len;
+                    }
+
+                    /* Copy closing '>' */
+                    *write++ = '>';
+                    remaining--;
+
+                    read = tag_end + 1;
+                }
+            } else {
+                /* No change needed, copy tag as-is */
+                size_t tag_len = tag_end - tag_start + 1;
+                if (tag_len < remaining) {
+                    memcpy(write, tag_start, tag_len);
+                    write += tag_len;
+                    remaining -= tag_len;
+                } else {
+                    /* Need more space */
+                    size_t written = write - output;
+                    capacity = (written + tag_len + 1) * 2;
+                    char *new_output = realloc(output, capacity);
+                    if (!new_output) {
+                        free(output);
+                        return NULL;
+                    }
+                    output = new_output;
+                    write = output + written;
+                    remaining = capacity - written;
+                    memcpy(write, tag_start, tag_len);
+                    write += tag_len;
+                    remaining -= tag_len;
+                }
+                read = tag_end + 1;
+            }
+        } else {
+            /* Not a header tag, copy character */
+            if (remaining > 0) {
+                *write++ = *read++;
+                remaining--;
+            } else {
+                /* Need more space */
+                size_t written = write - output;
+                capacity = (written + 1) * 2;
+                char *new_output = realloc(output, capacity);
+                if (!new_output) {
+                    free(output);
+                    return NULL;
+                }
+                output = new_output;
+                write = output + written;
+                remaining = capacity - written;
+                *write++ = *read++;
+                remaining--;
+            }
+        }
+    }
+
+    *write = '\0';
+    return output;
+}
+
+/**
+ * Adjust quote styles in HTML based on Quotes Language metadata
+ * Replaces default English quote entities with language-specific quotes
+ */
+char *apex_adjust_quote_language(const char *html, const char *quotes_language) {
+    if (!html) return NULL;
+
+    /* Default to English if not specified */
+    if (!quotes_language || *quotes_language == '\0') {
+        return strdup(html);
+    }
+
+    /* Normalize quotes language (lowercase, no spaces) */
+    char normalized[64] = {0};
+    const char *src = quotes_language;
+    char *dst = normalized;
+    while (*src && (dst - normalized) < (int)sizeof(normalized) - 1) {
+        if (!isspace((unsigned char)*src)) {
+            *dst++ = (char)tolower((unsigned char)*src);
+        }
+        src++;
+    }
+    *dst = '\0';
+
+    /* Determine quote replacements based on language */
+    const char *double_open = NULL;
+    const char *double_close = NULL;
+    const char *single_open = NULL;
+    const char *single_close = NULL;
+
+    if (strcmp(normalized, "english") == 0 || strcmp(normalized, "en") == 0) {
+        /* English: &ldquo; &rdquo; &lsquo; &rsquo; (default, no change needed) */
+        return strdup(html);
+    } else if (strcmp(normalized, "french") == 0 || strcmp(normalized, "fr") == 0) {
+        /* French: « » (guillemets) with spaces, ' ' for single */
+        double_open = "&laquo;&nbsp;";
+        double_close = "&nbsp;&raquo;";
+        single_open = "&rsquo;";
+        single_close = "&rsquo;";
+    } else if (strcmp(normalized, "german") == 0 || strcmp(normalized, "de") == 0) {
+        /* German: „ " (bottom/top) */
+        double_open = "&bdquo;";
+        double_close = "&ldquo;";
+        single_open = "&sbquo;";
+        single_close = "&lsquo;";
+    } else if (strcmp(normalized, "germanguillemets") == 0) {
+        /* German guillemets: » « (reversed) */
+        double_open = "&raquo;";
+        double_close = "&laquo;";
+        single_open = "&rsaquo;";
+        single_close = "&lsaquo;";
+    } else if (strcmp(normalized, "spanish") == 0 || strcmp(normalized, "es") == 0) {
+        /* Spanish: « » (guillemets) */
+        double_open = "&laquo;";
+        double_close = "&raquo;";
+        single_open = "&lsquo;";
+        single_close = "&rsquo;";
+    } else if (strcmp(normalized, "dutch") == 0 || strcmp(normalized, "nl") == 0) {
+        /* Dutch: „ " (like German) */
+        double_open = "&bdquo;";
+        double_close = "&ldquo;";
+        single_open = "&sbquo;";
+        single_close = "&lsquo;";
+    } else if (strcmp(normalized, "swedish") == 0 || strcmp(normalized, "sv") == 0) {
+        /* Swedish: " " (straight quotes become curly) */
+        double_open = "&rdquo;";
+        double_close = "&rdquo;";
+        single_open = "&rsquo;";
+        single_close = "&rsquo;";
+    } else {
+        /* Unknown language, use English (no change) */
+        return strdup(html);
+    }
+
+    /* If no replacements needed, return copy */
+    if (!double_open) {
+        return strdup(html);
+    }
+
+    /* Replace quote entities in HTML */
+    size_t html_len = strlen(html);
+    size_t capacity = html_len * 2;  /* Extra space for longer entities */
+    char *output = malloc(capacity);
+    if (!output) return NULL;
+
+    const char *read = html;
+    char *write = output;
+    size_t remaining = capacity;
+
+    while (*read) {
+        /* Check for double quote HTML entities */
+        if (strncmp(read, "&ldquo;", 7) == 0) {
+            size_t repl_len = strlen(double_open);
+            if (repl_len < remaining) {
+                memcpy(write, double_open, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 7;
+                continue;
+            }
+        } else if (strncmp(read, "&rdquo;", 7) == 0) {
+            size_t repl_len = strlen(double_close);
+            if (repl_len < remaining) {
+                memcpy(write, double_close, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 7;
+                continue;
+            }
+        } else if (strncmp(read, "&lsquo;", 7) == 0) {
+            size_t repl_len = strlen(single_open);
+            if (repl_len < remaining) {
+                memcpy(write, single_open, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 7;
+                continue;
+            }
+        } else if (strncmp(read, "&rsquo;", 7) == 0) {
+            size_t repl_len = strlen(single_close);
+            if (repl_len < remaining) {
+                memcpy(write, single_close, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 7;
+                continue;
+            }
+        }
+        /* Check for Unicode curly quotes (UTF-8 encoded) */
+        /* Left double quotation mark: U+201C = 0xE2 0x80 0x9C */
+        else if ((unsigned char)read[0] == 0xE2 && (unsigned char)read[1] == 0x80 && (unsigned char)read[2] == 0x9C) {
+            size_t repl_len = strlen(double_open);
+            if (repl_len < remaining) {
+                memcpy(write, double_open, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 3;
+                continue;
+            }
+        }
+        /* Right double quotation mark: U+201D = 0xE2 0x80 0x9D */
+        else if ((unsigned char)read[0] == 0xE2 && (unsigned char)read[1] == 0x80 && (unsigned char)read[2] == 0x9D) {
+            size_t repl_len = strlen(double_close);
+            if (repl_len < remaining) {
+                memcpy(write, double_close, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 3;
+                continue;
+            }
+        }
+        /* Left single quotation mark: U+2018 = 0xE2 0x80 0x98 */
+        else if ((unsigned char)read[0] == 0xE2 && (unsigned char)read[1] == 0x80 && (unsigned char)read[2] == 0x98) {
+            size_t repl_len = strlen(single_open);
+            if (repl_len < remaining) {
+                memcpy(write, single_open, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 3;
+                continue;
+            }
+        }
+        /* Right single quotation mark: U+2019 = 0xE2 0x80 0x99 */
+        else if ((unsigned char)read[0] == 0xE2 && (unsigned char)read[1] == 0x80 && (unsigned char)read[2] == 0x99) {
+            size_t repl_len = strlen(single_close);
+            if (repl_len < remaining) {
+                memcpy(write, single_close, repl_len);
+                write += repl_len;
+                remaining -= repl_len;
+                read += 3;
+                continue;
+            }
+        }
+
+        /* Not a quote entity, copy character */
+        if (remaining > 0) {
+            *write++ = *read++;
+            remaining--;
+        } else {
+            /* Need more space */
+            size_t written = write - output;
+            capacity = (written + 1) * 2;
+            char *new_output = realloc(output, capacity);
+            if (!new_output) {
+                free(output);
+                return NULL;
+            }
+            output = new_output;
+            write = output + written;
+            remaining = capacity - written;
+            *write++ = *read++;
+            remaining--;
+        }
     }
 
     *write = '\0';

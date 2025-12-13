@@ -16,6 +16,7 @@
 #define APEX_INCLUDES_H
 
 #include <stdbool.h>
+#include "metadata.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,8 +29,9 @@ extern "C" {
  * Returns newly allocated string with includes expanded
  * base_dir: base directory for relative paths (NULL for current dir)
  * metadata: metadata for transclude base support (can be NULL)
+ * depth: recursion depth (for preventing infinite loops)
  */
-char *apex_process_includes(const char *text, const char *base_dir, int depth);
+char *apex_process_includes(const char *text, const char *base_dir, apex_metadata_item *metadata, int depth);
 
 /**
  * Check if a file exists

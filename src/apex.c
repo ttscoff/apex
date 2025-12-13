@@ -1113,11 +1113,19 @@ static void apex_merge_mixed_list_markers(cmark_node *node) {
     if (!node) return;
 
     /* Process children first (depth-first) */
-    cmark_node *child = cmark_node_first_child(node);
-    while (child) {
-        cmark_node *next = cmark_node_next(child);
+    /* Get next sibling before processing to avoid issues if child modifies tree */
+    /* Note: If child merges with its next sibling during recursive processing,
+     * that sibling will be freed. So we need to get the next sibling from the
+     * parent's perspective after the recursive call, not use the pre-call next. */
+    for (cmark_node *child = cmark_node_first_child(node); child; ) {
+        /* Get next sibling BEFORE recursive call as a hint, but we'll re-get it after
+         * because the recursive call might have merged child with next and freed it. */
         apex_merge_mixed_list_markers(child);
-        child = next;
+        /* After recursive call, get next sibling from parent's perspective.
+         * If child was merged with its next sibling, that sibling is now freed,
+         * but child's position in the parent's child list hasn't changed, so
+         * we can safely get the next sibling. */
+        child = cmark_node_next(child);
     }
 
     /* Check if current node is a list */
@@ -1529,6 +1537,10 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     #define options (&local_opts)
 
     /* Extract metadata if enabled (preprocessing step) */
+    /* Safety check: ensure len doesn't exceed actual string length */
+    size_t actual_len = strlen(markdown);
+    if (len > actual_len) len = actual_len;
+
     char *working_text = malloc(len + 1);
     if (!working_text) return NULL;
     memcpy(working_text, markdown, len);
@@ -1695,7 +1707,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     /* Process file includes before parsing (preprocessing) */
     char *includes_processed = NULL;
     if (options->enable_file_includes) {
-        includes_processed = apex_process_includes(text_ptr, options->base_directory, 0);
+        includes_processed = apex_process_includes(text_ptr, options->base_directory, metadata, 0);
         if (includes_processed) {
             text_ptr = includes_processed;
         }
@@ -1862,6 +1874,82 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         if (processed_html && processed_html != html) {
             free(html);
             html = processed_html;
+        }
+    }
+
+    /* Extract metadata values needed for standalone HTML and post-processing BEFORE freeing metadata */
+    /* We need to duplicate strings because metadata will be freed */
+    char *css_metadata = NULL;
+    char *html_header_metadata = NULL;
+    char *html_footer_metadata = NULL;
+    char *language_metadata = NULL;
+    char *quotes_lang_metadata = NULL;
+    int base_header_level = 1;  /* Default is 1 */
+
+    if (metadata) {
+        /* Extract values we'll need later (before metadata is freed) and duplicate them */
+        const char *css_val = apex_metadata_get(metadata, "css");
+        if (css_val) css_metadata = strdup(css_val);
+
+        const char *html_header_val = apex_metadata_get(metadata, "HTML Header");
+        if (!html_header_val) {
+            html_header_val = apex_metadata_get(metadata, "html header");
+        }
+        if (html_header_val) html_header_metadata = strdup(html_header_val);
+
+        const char *html_footer_val = apex_metadata_get(metadata, "HTML Footer");
+        if (!html_footer_val) {
+            html_footer_val = apex_metadata_get(metadata, "html footer");
+        }
+        if (html_footer_val) html_footer_metadata = strdup(html_footer_val);
+
+        const char *lang_val = apex_metadata_get(metadata, "language");
+        if (lang_val) language_metadata = strdup(lang_val);
+
+        /* Get quotes language */
+        const char *quotes_lang_val = apex_metadata_get(metadata, "Quotes Language");
+        if (!quotes_lang_val) {
+            quotes_lang_val = apex_metadata_get(metadata, "quotes language");
+        }
+        if (!quotes_lang_val) {
+            quotes_lang_val = apex_metadata_get(metadata, "quoteslanguage");
+        }
+        /* If language is set but quotes language is not, use language for quotes */
+        if (!quotes_lang_val && lang_val) {
+            quotes_lang_val = lang_val;
+        }
+        if (quotes_lang_val) quotes_lang_metadata = strdup(quotes_lang_val);
+
+        /* Get header level */
+        const char *header_level_str = apex_metadata_get(metadata, "HTML Header Level");
+        if (!header_level_str) {
+            header_level_str = apex_metadata_get(metadata, "Base Header Level");
+        }
+        if (header_level_str) {
+            char *endptr;
+            long level = strtol(header_level_str, &endptr, 10);
+            if (endptr != header_level_str && level >= 1 && level <= 6) {
+                base_header_level = (int)level;
+            }
+        }
+    }
+
+    /* Adjust header levels and quote language based on metadata */
+    if (html) {
+        if (base_header_level > 1) {
+            char *adjusted_html = apex_adjust_header_levels(html, base_header_level);
+            if (adjusted_html) {
+                free(html);
+                html = adjusted_html;
+            }
+        }
+
+        if (quotes_lang_metadata) {
+            char *adjusted_quotes = apex_adjust_quote_language(html, quotes_lang_metadata);
+            if (adjusted_quotes) {
+                free(html);
+                html = adjusted_quotes;
+            }
         }
     }
 
@@ -2034,13 +2122,28 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     #undef options
 
     /* Wrap in complete HTML document if requested */
-    if (options->standalone && html) {
-        char *document = apex_wrap_html_document(html, options->document_title, options->stylesheet_path);
+    if (local_opts.standalone && html) {
+        /* CSS precedence: CLI flag (--css/--style) overrides metadata */
+        const char *css_path = local_opts.stylesheet_path;
+        if (!css_path) {
+            css_path = css_metadata;  /* Use extracted metadata value */
+        }
+
+        char *document = apex_wrap_html_document(html, local_opts.document_title, css_path,
+                                                 html_header_metadata, html_footer_metadata,
+                                                 language_metadata);
         if (document) {
             free(html);
             html = document;
         }
     }
+
+    /* Free duplicated metadata strings */
+    if (css_metadata) free(css_metadata);
+    if (html_header_metadata) free(html_header_metadata);
+    if (html_footer_metadata) free(html_footer_metadata);
+    if (language_metadata) free(language_metadata);
+    if (quotes_lang_metadata) free(quotes_lang_metadata);
 
     /* Remove blank lines within tables (applies to both pretty and non-pretty) */
     if (html) {
@@ -2053,7 +2156,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
 
     /* Remove table separator rows that were incorrectly rendered as data rows */
     /* This happens when smart typography converts --- to — in separator rows */
-    if (html && options->enable_tables) {
+    if (html && local_opts.enable_tables) {
         extern char *apex_remove_table_separator_rows(const char *html);
         char *cleaned = apex_remove_table_separator_rows(html);
         if (cleaned) {
@@ -2063,7 +2166,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     }
 
     /* Pretty-print HTML if requested */
-    if (options->pretty && html) {
+    if (local_opts.pretty && html) {
         char *pretty = apex_pretty_print_html(html);
         if (pretty) {
             free(html);
@@ -2077,76 +2180,179 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
 /**
  * Wrap HTML content in complete HTML5 document structure
  */
-char *apex_wrap_html_document(const char *content, const char *title, const char *stylesheet_path) {
+char *apex_wrap_html_document(const char *content, const char *title, const char *stylesheet_path, const char *html_header, const char *html_footer, const char *language) {
     if (!content) return NULL;
 
     const char *doc_title = title ? title : "Document";
+    const char *lang = language ? language : "en";
 
     /* Calculate buffer size */
     size_t content_len = strlen(content);
     size_t title_len = strlen(doc_title);
     size_t style_len = stylesheet_path ? strlen(stylesheet_path) : 0;
-    /* Need generous space for styles (1.5KB) + structure */
-    size_t capacity = content_len + title_len + style_len + 4096;
+    size_t header_len = html_header ? strlen(html_header) : 0;
+    size_t footer_len = html_footer ? strlen(html_footer) : 0;
+    size_t lang_len = strlen(lang);
+    /* Need generous space for styles (1.5KB) + structure + header + footer */
+    size_t capacity = content_len + title_len + style_len + header_len + footer_len + lang_len + 4096;
 
-    char *output = malloc(capacity);
+    char *output = malloc(capacity + 1);  /* +1 for null terminator */
     if (!output) return strdup(content);
 
     char *write = output;
+    size_t remaining = capacity + 1;  /* Include null terminator in remaining count */
+
+    /* Ensure we have a valid version string */
+    const char *version_str = APEX_VERSION_STRING;
+    if (!version_str) version_str = "unknown";
 
     /* HTML5 doctype and opening */
-    write += sprintf(write, "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
+    int n = snprintf(write, remaining, "<!DOCTYPE html>\n<html lang=\"%s\">\n<head>\n", lang);
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
 
     /* Meta tags */
-    write += sprintf(write, "  <meta charset=\"UTF-8\">\n");
-    write += sprintf(write, "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
-    write += sprintf(write, "  <meta name=\"generator\" content=\"Apex %s\">\n", APEX_VERSION_STRING);
+    n = snprintf(write, remaining, "  <meta charset=\"UTF-8\">\n");
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
+
+    n = snprintf(write, remaining, "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
+
+    n = snprintf(write, remaining, "  <meta name=\"generator\" content=\"Apex %s\">\n", version_str);
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
 
     /* Title */
-    write += sprintf(write, "  <title>%s</title>\n", doc_title);
+    n = snprintf(write, remaining, "  <title>%s</title>\n", doc_title);
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
 
     /* Stylesheet link if provided */
     if (stylesheet_path) {
-        write += sprintf(write, "  <link rel=\"stylesheet\" href=\"%s\">\n", stylesheet_path);
+        n = snprintf(write, remaining, "  <link rel=\"stylesheet\" href=\"%s\">\n", stylesheet_path);
+        if (n < 0 || (size_t)n >= remaining) {
+            free(output);
+            return strdup(content);
+        }
+        write += n;
+        remaining -= n;
     } else {
         /* Include minimal default styles */
-        write += sprintf(write, "  <style>\n");
-        write += sprintf(write, "    body {\n");
-        write += sprintf(write, "      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;\n");
-        write += sprintf(write, "      line-height: 1.6;\n");
-        write += sprintf(write, "      max-width: 800px;\n");
-        write += sprintf(write, "      margin: 2rem auto;\n");
-        write += sprintf(write, "      padding: 0 1rem;\n");
-        write += sprintf(write, "      color: #333;\n");
-        write += sprintf(write, "    }\n");
-        write += sprintf(write, "    pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }\n");
-        write += sprintf(write, "    code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 3px; }\n");
-        write += sprintf(write, "    blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 1rem; color: #666; }\n");
-        write += sprintf(write, "    table { border-collapse: collapse; width: 100%%; }\n");
-        write += sprintf(write, "    th, td { border: 1px solid #ddd; padding: 0.5rem; }\n");
-        write += sprintf(write, "    th { background: #f5f5f5; }\n");
-        write += sprintf(write, "    .page-break { page-break-after: always; }\n");
-        write += sprintf(write, "    .callout { padding: 1rem; margin: 1rem 0; border-left: 4px solid; }\n");
-        write += sprintf(write, "    .callout-note { border-color: #3b82f6; background: #eff6ff; }\n");
-        write += sprintf(write, "    .callout-warning { border-color: #f59e0b; background: #fffbeb; }\n");
-        write += sprintf(write, "    .callout-tip { border-color: #10b981; background: #f0fdf4; }\n");
-        write += sprintf(write, "    .callout-danger { border-color: #ef4444; background: #fef2f2; }\n");
-        write += sprintf(write, "    ins { background: #d4fcbc; text-decoration: none; }\n");
-        write += sprintf(write, "    del { background: #fbb6c2; text-decoration: line-through; }\n");
-        write += sprintf(write, "    mark { background: #fff3cd; }\n");
-        write += sprintf(write, "    .critic.comment { background: #e7e7e7; color: #666; font-style: italic; }\n");
-        write += sprintf(write, "  </style>\n");
+        const char *styles = "  <style>\n"
+            "    body {\n"
+            "      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;\n"
+            "      line-height: 1.6;\n"
+            "      max-width: 800px;\n"
+            "      margin: 2rem auto;\n"
+            "      padding: 0 1rem;\n"
+            "      color: #333;\n"
+            "    }\n"
+            "    pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }\n"
+            "    code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 3px; }\n"
+            "    blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 1rem; color: #666; }\n"
+            "    table { border-collapse: collapse; width: 100%%; }\n"
+            "    th, td { border: 1px solid #ddd; padding: 0.5rem; }\n"
+            "    th { background: #f5f5f5; }\n"
+            "    .page-break { page-break-after: always; }\n"
+            "    .callout { padding: 1rem; margin: 1rem 0; border-left: 4px solid; }\n"
+            "    .callout-note { border-color: #3b82f6; background: #eff6ff; }\n"
+            "    .callout-warning { border-color: #f59e0b; background: #fffbeb; }\n"
+            "    .callout-tip { border-color: #10b981; background: #f0fdf4; }\n"
+            "    .callout-danger { border-color: #ef4444; background: #fef2f2; }\n"
+            "    ins { background: #d4fcbc; text-decoration: none; }\n"
+            "    del { background: #fbb6c2; text-decoration: line-through; }\n"
+            "    mark { background: #fff3cd; }\n"
+            "    .critic.comment { background: #e7e7e7; color: #666; font-style: italic; }\n"
+            "  </style>\n";
+        size_t styles_len = strlen(styles);
+        if (styles_len >= remaining) {
+            free(output);
+            return strdup(content);
+        }
+        memcpy(write, styles, styles_len);
+        write += styles_len;
+        remaining -= styles_len;
+    }
+
+    /* HTML Header metadata - raw HTML inserted in <head> */
+    if (html_header) {
+        n = snprintf(write, remaining, "  %s\n", html_header);
+        if (n < 0 || (size_t)n >= remaining) {
+            free(output);
+            return strdup(content);
+        }
+        write += n;
+        remaining -= n;
     }
 
     /* Close head, open body */
-    write += sprintf(write, "</head>\n<body>\n\n");
+    n = snprintf(write, remaining, "</head>\n<body>\n\n");
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
 
     /* Content */
-    strcpy(write, content);
+    if (content_len + 1 > remaining) {  /* +1 for null terminator at end */
+        free(output);
+        return strdup(content);
+    }
+    memcpy(write, content, content_len);
     write += content_len;
+    remaining -= content_len;
+
+    /* HTML Footer metadata - raw HTML appended before </body> */
+    if (html_footer) {
+        n = snprintf(write, remaining, "\n%s", html_footer);
+        if (n < 0 || (size_t)n >= remaining) {
+            free(output);
+            return strdup(content);
+        }
+        write += n;
+        remaining -= n;
+    }
 
     /* Close body and html */
-    write += sprintf(write, "\n</body>\n</html>\n");
+    n = snprintf(write, remaining, "\n</body>\n</html>\n");
+    if (n < 0 || (size_t)n >= remaining) {
+        free(output);
+        return strdup(content);
+    }
+    write += n;
+    remaining -= n;
+
+    /* Null terminate - ensure we have space */
+    if (remaining > 0) {
+        *write = '\0';
+    } else {
+        /* Should never happen, but be safe */
+        free(output);
+        return strdup(content);
+    }
 
     return output;
 }

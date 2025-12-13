@@ -415,6 +415,8 @@ void apex_process_wiki_links_in_tree(cmark_node *node, wiki_link_config *config)
 
         if (changed) {
             /* Remove the original text node after rebuilding */
+            /* Unlink the node first, then free it. Since we're returning immediately
+             * and the parent iteration already has the next sibling, this is safe. */
             cmark_node_unlink(node);
             cmark_node_free(node);
             return;  /* Don't recurse into children after modifying tree */
@@ -423,8 +425,11 @@ void apex_process_wiki_links_in_tree(cmark_node *node, wiki_link_config *config)
 
 recurse:
     /* Recursively process children */
-    for (cmark_node *child = cmark_node_first_child(node); child; child = cmark_node_next(child)) {
+    /* Get next sibling before processing to avoid issues if child modifies/frees tree */
+    for (cmark_node *child = cmark_node_first_child(node); child; ) {
+        cmark_node *next = cmark_node_next(child);
         apex_process_wiki_links_in_tree(child, config);
+        child = next;
     }
 }
 

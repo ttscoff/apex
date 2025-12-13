@@ -513,7 +513,7 @@ char *apex_render_citations(const char *html, apex_citation_registry *registry, 
 
     /* For now, just replace placeholders with simple formatted citations */
     size_t len = strlen(html);
-    size_t capacity = len * 3;  /* Room for HTML tags */
+    size_t capacity = len * 3 + 1;  /* Room for HTML tags + null terminator */
     char *output = malloc(capacity);
     if (!output) return NULL;
 
@@ -617,7 +617,7 @@ char *apex_render_citations(const char *html, apex_citation_registry *registry, 
         }
 
         /* Copy character */
-        if (remaining > 0) {
+        if (remaining > 1) {  /* Reserve 1 byte for null terminator */
             *write++ = *read++;
             remaining--;
         } else {
@@ -625,7 +625,14 @@ char *apex_render_citations(const char *html, apex_citation_registry *registry, 
         }
     }
 
-    *write = '\0';
+    /* Null terminate - ensure we have space */
+    if (remaining > 0) {
+        *write = '\0';
+    } else {
+        /* Should never happen, but be safe */
+        free(output);
+        return strdup(html);
+    }
     return output;
 }
 

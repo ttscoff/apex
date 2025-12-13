@@ -4,6 +4,7 @@
  */
 
 #include "includes.h"
+#include "metadata.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -654,9 +655,54 @@ char *apex_resolve_wildcard(const char *filepath, const char *base_dir) {
 }
 
 /**
+ * Get transclude base from metadata, or return default base_dir
+ * Returns newly allocated string (caller must free) or NULL
+ */
+static char *get_transclude_base(const char *base_dir, apex_metadata_item *metadata) {
+    if (!metadata) {
+        return base_dir ? strdup(base_dir) : NULL;
+    }
+
+    /* Note: apex_metadata_get now handles case-insensitive matching and spaces being removed
+     * So "transclude base", "Transclude Base", "transcludebase" all work
+     */
+    const char *transclude_base = apex_metadata_get(metadata, "transclude base");
+
+    if (transclude_base) {
+        /* If absolute path, return as-is */
+        if (transclude_base[0] == '/') {
+            return strdup(transclude_base);
+        }
+
+        /* If relative path starting with ".", use current file's directory */
+        if (transclude_base[0] == '.' && (transclude_base[1] == '/' || transclude_base[1] == '\0')) {
+            if (base_dir) {
+                return strdup(base_dir);
+            }
+            return strdup(".");
+        }
+
+        /* Relative path - combine with base_dir */
+        if (base_dir) {
+            size_t len = strlen(base_dir) + strlen(transclude_base) + 2;
+            char *result = malloc(len);
+            if (result) {
+                snprintf(result, len, "%s/%s", base_dir, transclude_base);
+            }
+            return result;
+        }
+
+        return strdup(transclude_base);
+    }
+
+    /* No transclude base metadata, use default */
+    return base_dir ? strdup(base_dir) : NULL;
+}
+
+/**
  * Process file includes in text
  */
-char *apex_process_includes(const char *text, const char *base_dir, int depth) {
+char *apex_process_includes(const char *text, const char *base_dir, apex_metadata_item *metadata, int depth) {
     if (!text) return NULL;
     if (depth > MAX_INCLUDE_DEPTH) {
         return strdup(text);  /* Silently return original text */
@@ -667,6 +713,12 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
     if (output_capacity < 1024 * 1024) output_capacity = 1024 * 1024;  /* At least 1MB */
     char *output = malloc(output_capacity);
     if (!output) return NULL;
+
+    /* Get effective base directory from transclude base metadata */
+    char *effective_base_dir = get_transclude_base(base_dir, metadata);
+    if (!effective_base_dir && base_dir) {
+        effective_base_dir = strdup(base_dir);
+    }
 
     const char *read_pos = text;
     char *write_pos = output;
@@ -693,7 +745,7 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                 filepath[filepath_len] = '\0';
 
                 /* Resolve and check file exists */
-                char *resolved_path = resolve_path(filepath, base_dir);
+                char *resolved_path = resolve_path(filepath, effective_base_dir);
                 if (resolved_path && apex_file_exists(resolved_path)) {
                     apex_file_type_t file_type = apex_detect_file_type(resolved_path);
                     char *content = read_file_contents(resolved_path);
@@ -716,9 +768,29 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                             if (to_insert) sprintf(to_insert, "\n```%s\n%s\n```\n", lang, content);
                         } else {
                             /* Text/Markdown: process and include */
-                            char *file_dir = get_directory(resolved_path);
-                            to_insert = apex_process_includes(content, file_dir, depth + 1);
-                            free(file_dir);
+                            /* Extract metadata from transcluded file */
+                            char *file_content_for_metadata = strdup(content);
+                            apex_metadata_item *file_metadata = NULL;
+                            char *file_text_after_metadata = file_content_for_metadata;
+                            if (file_content_for_metadata) {
+                                file_metadata = apex_extract_metadata(&file_text_after_metadata);
+                            }
+
+                            /* Get transclude base from file's metadata, or use file's directory */
+                            char *transclude_base = NULL;
+                            if (file_metadata) {
+                                transclude_base = get_transclude_base(get_directory(resolved_path), file_metadata);
+                            }
+                            if (!transclude_base) {
+                                transclude_base = get_directory(resolved_path);
+                            }
+
+                            to_insert = apex_process_includes(content, transclude_base, file_metadata, depth + 1);
+
+                            /* Cleanup */
+                            if (transclude_base) free(transclude_base);
+                            if (file_metadata) apex_free_metadata(file_metadata);
+                            if (file_content_for_metadata) free(file_content_for_metadata);
                         }
 
                         if (to_insert) {
@@ -776,16 +848,24 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                 }
 
                 /* Resolve path (handle wildcards) */
-                char *resolved_path = apex_resolve_wildcard(filepath, base_dir);
+                char *resolved_path = apex_resolve_wildcard(filepath, effective_base_dir);
                 if (!resolved_path) {
                     /* Try without wildcard resolution */
-                    resolved_path = resolve_path(filepath, base_dir);
+                    resolved_path = resolve_path(filepath, effective_base_dir);
                 }
 
                 if (resolved_path) {
                     apex_file_type_t file_type = apex_detect_file_type(resolved_path);
                     char *content = read_file_contents(resolved_path);
                     if (content) {
+                        /* Extract metadata from original file content FIRST (before any processing) */
+                        char *file_content_for_metadata = strdup(content);
+                        apex_metadata_item *file_metadata = NULL;
+                        char *file_text_after_metadata = file_content_for_metadata;
+                        if (file_content_for_metadata) {
+                            file_metadata = apex_extract_metadata(&file_text_after_metadata);
+                        }
+
                         /* Apply address specification if present */
                         char *extracted_content = content;
                         bool free_extracted = false;
@@ -809,10 +889,22 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                             }
                         }
 
-                        /* Recursively process */
-                        char *file_dir = get_directory(resolved_path);
-                        char *processed = apex_process_includes(to_process, file_dir, depth + 1);
-                        free(file_dir);
+                        /* Get transclude base from file's metadata, or use file's directory */
+                        char *transclude_base = NULL;
+                        if (file_metadata) {
+                            transclude_base = get_transclude_base(get_directory(resolved_path), file_metadata);
+                        }
+                        if (!transclude_base) {
+                            transclude_base = get_directory(resolved_path);
+                        }
+
+                        /* Recursively process with file's metadata and transclude base */
+                        char *processed = apex_process_includes(to_process, transclude_base, file_metadata, depth + 1);
+
+                        /* Cleanup */
+                        if (transclude_base) free(transclude_base);
+                        if (file_metadata) apex_free_metadata(file_metadata);
+                        if (file_content_for_metadata) free(file_content_for_metadata);
 
                         if (processed) {
                             size_t proc_len = strlen(processed);
@@ -900,11 +992,19 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                     }
 
                     /* Resolve path */
-                    char *resolved_path = resolve_path(filepath, base_dir);
+                    char *resolved_path = resolve_path(filepath, effective_base_dir);
                     if (resolved_path) {
                         apex_file_type_t file_type = apex_detect_file_type(resolved_path);
                         char *content = read_file_contents(resolved_path);
                         if (content) {
+                            /* Extract metadata from original file content FIRST (before any processing) */
+                            char *file_content_for_metadata = strdup(content);
+                            apex_metadata_item *file_metadata = NULL;
+                            char *file_text_after_metadata = file_content_for_metadata;
+                            if (file_content_for_metadata) {
+                                file_metadata = apex_extract_metadata(&file_text_after_metadata);
+                            }
+
                             /* Apply address specification if present */
                             char *extracted_content = content;
                             bool free_extracted = false;
@@ -931,9 +1031,22 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
                                 }
 
                                 /* Markdown include - recursively process */
-                                char *file_dir = get_directory(resolved_path);
-                                char *processed = apex_process_includes(to_process, file_dir, depth + 1);
-                                free(file_dir);
+
+                                /* Get transclude base from file's metadata, or use file's directory */
+                                char *transclude_base = NULL;
+                                if (file_metadata) {
+                                    transclude_base = get_transclude_base(get_directory(resolved_path), file_metadata);
+                                }
+                                if (!transclude_base) {
+                                    transclude_base = get_directory(resolved_path);
+                                }
+
+                                char *processed = apex_process_includes(to_process, transclude_base, file_metadata, depth + 1);
+
+                                /* Cleanup */
+                                if (transclude_base) free(transclude_base);
+                                if (file_metadata) apex_free_metadata(file_metadata);
+                                if (file_content_for_metadata) free(file_content_for_metadata);
 
                                 if (processed) {
                                     size_t proc_len = strlen(processed);
@@ -1018,6 +1131,10 @@ char *apex_process_includes(const char *text, const char *base_dir, int depth) {
     }
 
     *write_pos = '\0';
+
+    /* Cleanup */
+    if (effective_base_dir) free(effective_base_dir);
+
     return output;
 }
 

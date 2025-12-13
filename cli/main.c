@@ -53,7 +53,7 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  --show-tooltips         Show tooltips on citations\n");
     fprintf(stderr, "  --reject               Reject all Critic Markup changes (revert edits)\n");
     fprintf(stderr, "  -s, --standalone       Generate complete HTML document (with <html>, <head>, <body>)\n");
-    fprintf(stderr, "  --style FILE           Link to CSS file in document head (requires --standalone)\n");
+    fprintf(stderr, "  --css FILE, --style FILE  Link to CSS file in document head (requires --standalone, overrides CSS metadata)\n");
     fprintf(stderr, "  --title TITLE          Document title (requires --standalone, default: \"Document\")\n");
     fprintf(stderr, "  -v, --version          Show version information\n\n");
     fprintf(stderr, "If no file is specified, reads from stdin.\n");
@@ -200,13 +200,13 @@ int main(int argc, char *argv[]) {
             options.hardbreaks = true;
         } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--standalone") == 0) {
             options.standalone = true;
-        } else if (strcmp(argv[i], "--style") == 0) {
+        } else if (strcmp(argv[i], "--css") == 0 || strcmp(argv[i], "--style") == 0) {
             if (++i >= argc) {
-                fprintf(stderr, "Error: --style requires an argument\n");
+                fprintf(stderr, "Error: %s requires an argument\n", argv[i-1]);
                 return 1;
             }
             options.stylesheet_path = argv[i];
-            options.standalone = true;  /* Imply standalone if style is specified */
+            options.standalone = true;  /* Imply standalone if CSS is specified */
         } else if (strcmp(argv[i], "--title") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --title requires an argument\n");
@@ -521,8 +521,7 @@ int main(int argc, char *argv[]) {
         bibliography_files = realloc(bibliography_files, (bibliography_count + 1) * sizeof(char*));
         if (bibliography_files) {
             bibliography_files[bibliography_count] = NULL;  /* NULL terminator */
-            /* Note: We cast away const here because bibliography_files are from argv */
-            options.bibliography_files = (const char **)(void *)bibliography_files;
+            options.bibliography_files = bibliography_files;
         }
     }
 

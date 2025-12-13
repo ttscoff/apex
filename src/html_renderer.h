@@ -64,6 +64,24 @@ char *apex_remove_table_blank_lines(const char *html);
  */
 char *apex_remove_table_separator_rows(const char *html);
 
+/**
+ * Adjust header levels in HTML based on Base Header Level metadata
+ * Shifts all headers by the specified offset (e.g., Base Header Level: 2 means h1->h2, h2->h3, etc.)
+ * @param html The HTML to process
+ * @param base_header_level The base header level (1-6, or 0 to disable)
+ * @return Newly allocated HTML with adjusted header levels (must be freed)
+ */
+char *apex_adjust_header_levels(const char *html, int base_header_level);
+
+/**
+ * Adjust quote styles in HTML based on Quotes Language metadata
+ * Replaces default English quote entities with language-specific quotes
+ * @param html The HTML to process
+ * @param quotes_language The quotes language (dutch/nl, english/en, french/fr, german/de, germanguillemets, spanish/es, swedish/sv, or NULL for default)
+ * @return Newly allocated HTML with adjusted quotes (must be freed)
+ */
+char *apex_adjust_quote_language(const char *html, const char *quotes_language);
+
 #ifdef __cplusplus
 }
 #endif
