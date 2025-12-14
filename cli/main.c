@@ -568,38 +568,24 @@ int main(int argc, char *argv[]) {
     PROFILE_END(metadata_yaml_build);
 
     /* Set bibliography files in options (NULL-terminated array) */
+    char **saved_bibliography_files = NULL;
     if (bibliography_count > 0) {
         bibliography_files = realloc(bibliography_files, (bibliography_count + 1) * sizeof(char*));
         if (bibliography_files) {
             bibliography_files[bibliography_count] = NULL;  /* NULL terminator */
             options.bibliography_files = bibliography_files;
+            /* Save reference in case metadata mode resets options */
+            saved_bibliography_files = bibliography_files;
         }
     }
 
-    /* Check metadata for bibliography field and enable citations if found */
+    /* Apply metadata to options - allows per-document control of command-line options */
     /* Note: Bibliography file loading from metadata will be handled in citations extension */
     if (merged_metadata) {
-        const char *bib_value = apex_metadata_get(merged_metadata, "bibliography");
-        if (bib_value) {
-            options.enable_citations = true;
-            /* If no CLI bibliography files, metadata bibliography will be handled in processing */
-        }
-        const char *csl_value = apex_metadata_get(merged_metadata, "csl");
-        if (csl_value && !options.csl_file) {
-            options.csl_file = csl_value;
-            options.enable_citations = true;
-        }
-        const char *suppress_bib = apex_metadata_get(merged_metadata, "suppress-bibliography");
-        if (suppress_bib && (strcasecmp(suppress_bib, "true") == 0 || strcasecmp(suppress_bib, "yes") == 0 || strcmp(suppress_bib, "1") == 0)) {
-            options.suppress_bibliography = true;
-        }
-        const char *link_cites = apex_metadata_get(merged_metadata, "link-citations");
-        if (link_cites && (strcasecmp(link_cites, "true") == 0 || strcasecmp(link_cites, "yes") == 0 || strcmp(link_cites, "1") == 0)) {
-            options.link_citations = true;
-        }
-        const char *show_tips = apex_metadata_get(merged_metadata, "show-tooltips");
-        if (show_tips && (strcasecmp(show_tips, "true") == 0 || strcasecmp(show_tips, "yes") == 0 || strcmp(show_tips, "1") == 0)) {
-            options.show_tooltips = true;
+        apex_apply_metadata_to_options(merged_metadata, &options);
+        /* Restore bibliography files if they were lost (e.g., if mode was set in metadata) */
+        if (saved_bibliography_files && !options.bibliography_files) {
+            options.bibliography_files = saved_bibliography_files;
         }
     }
 

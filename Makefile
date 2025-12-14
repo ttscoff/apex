@@ -49,6 +49,14 @@ endif
 
 NEW_VERSION := $(NEW_MAJOR).$(NEW_MINOR).$(NEW_PATCH)
 
+# Default target: build from source
+build:
+	@echo "Configuring build with cmake..."
+	@cmake -S . -B build
+	@echo "Building..."
+	@cmake --build build
+	@echo "Build complete! Binary is in build/ directory."
+
 help:
 	@echo "Apex Makefile"
 	@echo ""
@@ -108,14 +116,6 @@ check-version:
 		echo "Error: Could not calculate new version"; \
 		exit 1; \
 	fi
-
-# Build from source
-build:
-	@echo "Configuring build with cmake..."
-	@cmake -S . -B build
-	@echo "Building..."
-	@cmake --build build
-	@echo "Build complete! Binary is in build/ directory."
 
 # Install built binaries and libraries
 install: build

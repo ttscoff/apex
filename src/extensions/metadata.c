@@ -1991,3 +1991,292 @@ apex_metadata_item *apex_merge_metadata(apex_metadata_item *first, ...) {
     va_end(args);
     return result;
 }
+
+/**
+ * Helper function to check if a string represents a true value
+ */
+static bool is_true_value(const char *value) {
+    if (!value) return false;
+    /* Downcase the value for comparison */
+    char *lower = strdup(value);
+    if (!lower) return false;
+    for (char *p = lower; *p; p++) {
+        *p = (char)tolower((unsigned char)*p);
+    }
+    bool result = (strcmp(lower, "true") == 0 ||
+                   strcmp(lower, "yes") == 0 ||
+                   strcmp(lower, "1") == 0);
+    free(lower);
+    return result;
+}
+
+/**
+ * Helper function to check if a string represents a false value
+ */
+static bool is_false_value(const char *value) {
+    if (!value) return false;
+    /* Downcase the value for comparison */
+    char *lower = strdup(value);
+    if (!lower) return false;
+    for (char *p = lower; *p; p++) {
+        *p = (char)tolower((unsigned char)*p);
+    }
+    bool result = (strcmp(lower, "false") == 0 ||
+                   strcmp(lower, "no") == 0 ||
+                   strcmp(lower, "0") == 0);
+    free(lower);
+    return result;
+}
+
+/**
+ * Apply metadata values to apex_options structure
+ * Maps metadata keys to command-line options, allowing per-document control
+ */
+void apex_apply_metadata_to_options(apex_metadata_item *metadata, apex_options *options) {
+    if (!metadata || !options) return;
+
+    /* First pass: handle mode if specified (this resets options to mode defaults) */
+    apex_metadata_item *item = metadata;
+    while (item) {
+        const char *key = item->key;
+        const char *value = item->value;
+
+        if (key && value && strcasecmp(key, "mode") == 0) {
+            /* Convert string to enum and apply mode (this resets all options) */
+            char *lower = strdup(value);
+            if (lower) {
+                for (char *p = lower; *p; p++) {
+                    *p = (char)tolower((unsigned char)*p);
+                }
+                if (strcmp(lower, "commonmark") == 0) {
+                    *options = apex_options_for_mode(APEX_MODE_COMMONMARK);
+                } else if (strcmp(lower, "gfm") == 0) {
+                    *options = apex_options_for_mode(APEX_MODE_GFM);
+                } else if (strcmp(lower, "mmd") == 0 || strcmp(lower, "multimarkdown") == 0) {
+                    *options = apex_options_for_mode(APEX_MODE_MULTIMARKDOWN);
+                } else if (strcmp(lower, "kramdown") == 0) {
+                    *options = apex_options_for_mode(APEX_MODE_KRAMDOWN);
+                } else if (strcmp(lower, "unified") == 0) {
+                    *options = apex_options_for_mode(APEX_MODE_UNIFIED);
+                }
+                free(lower);
+            }
+            break;  /* Only process first mode found */
+        }
+        item = item->next;
+    }
+
+    /* Second pass: apply all other metadata options */
+    item = metadata;
+    while (item) {
+        const char *key = item->key;
+        const char *value = item->value;
+
+        if (!key || !value) {
+            item = item->next;
+            continue;
+        }
+
+        /* Skip mode - already processed */
+        if (strcasecmp(key, "mode") == 0) {
+            item = item->next;
+            continue;
+        }
+
+        /* Boolean flags (with --[no-] variants) */
+        if (strcasecmp(key, "indices") == 0) {
+            if (is_true_value(value)) {
+                options->enable_indices = true;
+                options->enable_mmark_index_syntax = true;
+                options->enable_textindex_syntax = true;
+            } else if (is_false_value(value)) {
+                options->enable_indices = false;
+            }
+        } else if (strcasecmp(key, "wikilinks") == 0 || strcasecmp(key, "wiki-links") == 0) {
+            if (is_true_value(value)) {
+                options->enable_wiki_links = true;
+            } else if (is_false_value(value)) {
+                options->enable_wiki_links = false;
+            }
+        } else if (strcasecmp(key, "includes") == 0 || strcasecmp(key, "file-includes") == 0) {
+            if (is_true_value(value)) {
+                options->enable_file_includes = true;
+            } else if (is_false_value(value)) {
+                options->enable_file_includes = false;
+            }
+        } else if (strcasecmp(key, "relaxed-tables") == 0 || strcasecmp(key, "relaxed_tables") == 0) {
+            if (is_true_value(value)) {
+                options->relaxed_tables = true;
+            } else if (is_false_value(value)) {
+                options->relaxed_tables = false;
+            }
+        } else if (strcasecmp(key, "alpha-lists") == 0 || strcasecmp(key, "alpha_lists") == 0) {
+            if (is_true_value(value)) {
+                options->allow_alpha_lists = true;
+            } else if (is_false_value(value)) {
+                options->allow_alpha_lists = false;
+            }
+        } else if (strcasecmp(key, "mixed-lists") == 0 || strcasecmp(key, "mixed_lists") == 0) {
+            if (is_true_value(value)) {
+                options->allow_mixed_list_markers = true;
+            } else if (is_false_value(value)) {
+                options->allow_mixed_list_markers = false;
+            }
+        } else if (strcasecmp(key, "sup-sub") == 0 || strcasecmp(key, "sup_sub") == 0) {
+            if (is_true_value(value)) {
+                options->enable_sup_sub = true;
+            } else if (is_false_value(value)) {
+                options->enable_sup_sub = false;
+            }
+        } else if (strcasecmp(key, "autolink") == 0) {
+            if (is_true_value(value)) {
+                options->enable_autolink = true;
+            } else if (is_false_value(value)) {
+                options->enable_autolink = false;
+            }
+        } else if (strcasecmp(key, "transforms") == 0 || strcasecmp(key, "metadata-transforms") == 0) {
+            if (is_true_value(value)) {
+                options->enable_metadata_transforms = true;
+            } else if (is_false_value(value)) {
+                options->enable_metadata_transforms = false;
+            }
+        } else if (strcasecmp(key, "unsafe") == 0) {
+            if (is_true_value(value)) {
+                options->unsafe = true;
+            } else if (is_false_value(value)) {
+                options->unsafe = false;
+            }
+        } else if (strcasecmp(key, "tables") == 0) {
+            if (is_true_value(value)) {
+                options->enable_tables = true;
+            } else if (is_false_value(value)) {
+                options->enable_tables = false;
+            }
+        } else if (strcasecmp(key, "footnotes") == 0) {
+            if (is_true_value(value)) {
+                options->enable_footnotes = true;
+            } else if (is_false_value(value)) {
+                options->enable_footnotes = false;
+            }
+        } else if (strcasecmp(key, "smart") == 0 || strcasecmp(key, "smart-typography") == 0) {
+            if (is_true_value(value)) {
+                options->enable_smart_typography = true;
+            } else if (is_false_value(value)) {
+                options->enable_smart_typography = false;
+            }
+        } else if (strcasecmp(key, "math") == 0) {
+            if (is_true_value(value)) {
+                options->enable_math = true;
+            } else if (is_false_value(value)) {
+                options->enable_math = false;
+            }
+        } else if (strcasecmp(key, "ids") == 0 || strcasecmp(key, "header-ids") == 0) {
+            if (is_true_value(value)) {
+                options->generate_header_ids = true;
+            } else if (is_false_value(value)) {
+                options->generate_header_ids = false;
+            }
+        } else if (strcasecmp(key, "header-anchors") == 0 || strcasecmp(key, "header_anchors") == 0) {
+            if (is_true_value(value)) {
+                options->header_anchors = true;
+            } else if (is_false_value(value)) {
+                options->header_anchors = false;
+            }
+        } else if (strcasecmp(key, "embed-images") == 0 || strcasecmp(key, "embed_images") == 0) {
+            if (is_true_value(value)) {
+                options->embed_images = true;
+            } else if (is_false_value(value)) {
+                options->embed_images = false;
+            }
+        } else if (strcasecmp(key, "link-citations") == 0 || strcasecmp(key, "link_citations") == 0) {
+            if (is_true_value(value)) {
+                options->link_citations = true;
+            } else if (is_false_value(value)) {
+                options->link_citations = false;
+            }
+        } else if (strcasecmp(key, "show-tooltips") == 0 || strcasecmp(key, "show_tooltips") == 0) {
+            if (is_true_value(value)) {
+                options->show_tooltips = true;
+            } else if (is_false_value(value)) {
+                options->show_tooltips = false;
+            }
+        } else if (strcasecmp(key, "suppress-bibliography") == 0 || strcasecmp(key, "suppress_bibliography") == 0) {
+            if (is_true_value(value)) {
+                options->suppress_bibliography = true;
+            } else if (is_false_value(value)) {
+                options->suppress_bibliography = false;
+            }
+        } else if (strcasecmp(key, "suppress-index") == 0 || strcasecmp(key, "suppress_index") == 0) {
+            if (is_true_value(value)) {
+                options->suppress_index = true;
+            } else if (is_false_value(value)) {
+                options->suppress_index = false;
+            }
+        } else if (strcasecmp(key, "group-index-by-letter") == 0 || strcasecmp(key, "group_index_by_letter") == 0) {
+            if (is_true_value(value)) {
+                options->group_index_by_letter = true;
+            } else if (is_false_value(value)) {
+                options->group_index_by_letter = false;
+            }
+        } else if (strcasecmp(key, "obfuscate-emails") == 0 || strcasecmp(key, "obfuscate_emails") == 0) {
+            if (is_true_value(value)) {
+                options->obfuscate_emails = true;
+            } else if (is_false_value(value)) {
+                options->obfuscate_emails = false;
+            }
+        } else if (strcasecmp(key, "pretty") == 0) {
+            if (is_true_value(value)) {
+                options->pretty = true;
+            } else if (is_false_value(value)) {
+                options->pretty = false;
+            }
+        } else if (strcasecmp(key, "standalone") == 0) {
+            if (is_true_value(value)) {
+                options->standalone = true;
+            } else if (is_false_value(value)) {
+                options->standalone = false;
+            }
+        } else if (strcasecmp(key, "hardbreaks") == 0 || strcasecmp(key, "hard-breaks") == 0) {
+            if (is_true_value(value)) {
+                options->hardbreaks = true;
+            } else if (is_false_value(value)) {
+                options->hardbreaks = false;
+            }
+        }
+        /* String options */
+        else if (strcasecmp(key, "bibliography") == 0) {
+            /* Bibliography can be a single file or comma-separated list */
+            /* Note: This will be handled by the citations extension, but we enable citations here */
+            options->enable_citations = true;
+            /* The actual bibliography file loading is handled in the citations extension */
+        } else if (strcasecmp(key, "csl") == 0) {
+            options->csl_file = value;
+            options->enable_citations = true;
+        } else if (strcasecmp(key, "title") == 0) {
+            options->document_title = value;
+        } else if (strcasecmp(key, "style") == 0 || strcasecmp(key, "css") == 0) {
+            options->stylesheet_path = value;
+            options->standalone = true;  /* Imply standalone if CSS is specified */
+        } else if (strcasecmp(key, "id-format") == 0 || strcasecmp(key, "id_format") == 0) {
+            /* Convert string to enum: gfm=0, mmd=1, kramdown=2 */
+            char *lower = strdup(value);
+            if (lower) {
+                for (char *p = lower; *p; p++) {
+                    *p = (char)tolower((unsigned char)*p);
+                }
+                if (strcmp(lower, "gfm") == 0) {
+                    options->id_format = 0;
+                } else if (strcmp(lower, "mmd") == 0) {
+                    options->id_format = 1;
+                } else if (strcmp(lower, "kramdown") == 0) {
+                    options->id_format = 2;
+                }
+                free(lower);
+            }
+        } else if (strcasecmp(key, "base-dir") == 0 || strcasecmp(key, "base_dir") == 0) {
+            options->base_directory = value;
+        }
+
+        item = item->next;
+    }
+}

@@ -1,11 +1,15 @@
-
+<!--README-->
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-
+<!--GITHUB-->
 # Apex
-
+<!--END GITHUB-->
 
 Apex is a unified Markdown processor that combines the best features from CommonMark, GitHub Flavored Markdown (GFM), MultiMarkdown, Kramdown, and Marked. One processor to rule them all.
+
+<!--GITHUB-->![](apex-header-2-rb@2x.webp)<!--END GITHUB-->
+
+<!--JEKYLL {% img alignright /uploads/2025/12/apexicon.png 300 300 "Apex Icon" %}-->There are so many variations of Markdown, extending its features in all kinds of ways. But picking one flavor means giving up the features of another flavor. So I'm building Apex with the goal of making all of the most popular features of various processors available in one tool.
 
 ## Features
 
@@ -195,3 +199,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE]([LICENSE](https://github.com/ttscoff/apex/blob/main/LICENSE)) file for details.
+<!--END README-->

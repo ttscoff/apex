@@ -87,6 +87,15 @@ apex_metadata_item *apex_parse_command_metadata(const char *arg);
  */
 apex_metadata_item *apex_merge_metadata(apex_metadata_item *first, ...);
 
+/**
+ * Apply metadata values to apex_options structure
+ * Maps metadata keys to command-line options, allowing per-document control
+ * Boolean values: accepts "true", "false", "yes", "no", "1", "0" (case-insensitive)
+ * String values: used directly for options that take arguments
+ * Modifies the options structure in-place
+ */
+void apex_apply_metadata_to_options(apex_metadata_item *metadata, apex_options *options);
+
 #ifdef __cplusplus
 }
 #endif
