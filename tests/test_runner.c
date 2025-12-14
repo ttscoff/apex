@@ -4,6 +4,7 @@
  */
 
 #include "apex/apex.h"
+#include "../src/extensions/metadata.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -2996,6 +2997,230 @@ static void test_citations(void) {
 }
 
 /**
+ * Assert that a boolean option is set correctly
+ */
+static bool assert_option_bool(bool actual, bool expected, const char *test_name) {
+    tests_run++;
+    if (actual == expected) {
+        tests_passed++;
+        printf(COLOR_GREEN "✓" COLOR_RESET " %s\n", test_name);
+        return true;
+    } else {
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " %s\n", test_name);
+        printf("  Expected: %s, Got: %s\n", expected ? "true" : "false", actual ? "true" : "false");
+        return false;
+    }
+}
+
+/**
+ * Assert that a string option matches
+ */
+static bool assert_option_string(const char *actual, const char *expected, const char *test_name) {
+    tests_run++;
+    bool match = (actual == expected) || (actual && expected && strcmp(actual, expected) == 0);
+    if (match) {
+        tests_passed++;
+        printf(COLOR_GREEN "✓" COLOR_RESET " %s\n", test_name);
+        return true;
+    } else {
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " %s\n", test_name);
+        printf("  Expected: %s, Got: %s\n", expected ? expected : "(null)", actual ? actual : "(null)");
+        return false;
+    }
+}
+
+/**
+ * Test metadata control of command-line options
+ */
+static void test_metadata_control_options(void) {
+    printf("\n=== Metadata Control of Options Tests ===\n");
+
+    /* Test boolean options via metadata */
+    apex_options opts = apex_options_default();
+    opts.enable_indices = true;  /* Start with indices enabled */
+    opts.enable_wiki_links = false;  /* Start with wikilinks disabled */
+
+    /* Create metadata with boolean options */
+    apex_metadata_item *metadata = NULL;
+    apex_metadata_item *item;
+
+    /* Test indices: false */
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("indices");
+    item->value = strdup("false");
+    item->next = metadata;
+    metadata = item;
+
+    /* Test wikilinks: true */
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("wikilinks");
+    item->value = strdup("true");
+    item->next = metadata;
+    metadata = item;
+
+    /* Test pretty: yes */
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("pretty");
+    item->value = strdup("yes");
+    item->next = metadata;
+    metadata = item;
+
+    /* Test standalone: 1 */
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("standalone");
+    item->value = strdup("1");
+    item->next = metadata;
+    metadata = item;
+
+    /* Apply metadata */
+    apex_apply_metadata_to_options(metadata, &opts);
+
+    /* Verify boolean options */
+    assert_option_bool(opts.enable_indices, false, "indices: false sets enable_indices to false");
+    assert_option_bool(opts.enable_wiki_links, true, "wikilinks: true sets enable_wiki_links to true");
+    assert_option_bool(opts.pretty, true, "pretty: yes sets pretty to true");
+    assert_option_bool(opts.standalone, true, "standalone: 1 sets standalone to true");
+
+    /* Clean up */
+    apex_free_metadata(metadata);
+    metadata = NULL;
+
+    /* Test string options */
+    opts = apex_options_default();
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("title");
+    item->value = strdup("My Test Document");
+    item->next = NULL;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("csl");
+    item->value = strdup("apa.csl");
+    item->next = metadata;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("id-format");
+    item->value = strdup("mmd");
+    item->next = metadata;
+    metadata = item;
+
+    apex_apply_metadata_to_options(metadata, &opts);
+
+    assert_option_string(opts.document_title, "My Test Document", "title sets document_title");
+    assert_option_string(opts.csl_file, "apa.csl", "csl sets csl_file");
+    assert_option_bool(opts.id_format == 1, true, "id-format: mmd sets id_format to 1 (MMD)");
+
+    apex_free_metadata(metadata);
+    metadata = NULL;
+
+    /* Test mode option (should reset options) */
+    opts = apex_options_default();
+    opts.enable_indices = true;
+    opts.enable_wiki_links = true;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("mode");
+    item->value = strdup("gfm");
+    item->next = NULL;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("wikilinks");
+    item->value = strdup("true");
+    item->next = metadata;
+    metadata = item;
+
+    apex_apply_metadata_to_options(metadata, &opts);
+
+    assert_option_bool(opts.mode == APEX_MODE_GFM, true, "mode: gfm sets mode to GFM");
+    /* After mode reset, wikilinks should still be applied */
+    assert_option_bool(opts.enable_wiki_links, true, "wikilinks applied after mode reset");
+
+    apex_free_metadata(metadata);
+    metadata = NULL;
+
+    /* Test case-insensitive boolean values */
+    opts = apex_options_default();
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("indices");
+    item->value = strdup("TRUE");
+    item->next = NULL;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("wikilinks");
+    item->value = strdup("FALSE");
+    item->next = metadata;
+    metadata = item;
+
+    apex_apply_metadata_to_options(metadata, &opts);
+
+    assert_option_bool(opts.enable_indices, true, "indices: TRUE (uppercase) sets enable_indices to true");
+    assert_option_bool(opts.enable_wiki_links, false, "wikilinks: FALSE (uppercase) sets enable_wiki_links to false");
+
+    apex_free_metadata(metadata);
+    metadata = NULL;
+
+    /* Test more boolean options */
+    opts = apex_options_default();
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("relaxed-tables");
+    item->value = strdup("true");
+    item->next = NULL;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("link-citations");
+    item->value = strdup("yes");
+    item->next = metadata;
+    metadata = item;
+
+    item = malloc(sizeof(apex_metadata_item));
+    item->key = strdup("suppress-bibliography");
+    item->value = strdup("1");
+    item->next = metadata;
+    metadata = item;
+
+    apex_apply_metadata_to_options(metadata, &opts);
+
+    assert_option_bool(opts.relaxed_tables, true, "relaxed-tables: true sets relaxed_tables");
+    assert_option_bool(opts.link_citations, true, "link-citations: yes sets link_citations");
+    assert_option_bool(opts.suppress_bibliography, true, "suppress-bibliography: 1 sets suppress_bibliography");
+
+    apex_free_metadata(metadata);
+
+    /* Test loading metadata from file */
+#ifdef TEST_FIXTURES_DIR
+    opts = apex_options_default();
+    char metadata_file_path[512];
+    snprintf(metadata_file_path, sizeof(metadata_file_path), "%s/metadata_options.yml", TEST_FIXTURES_DIR);
+    apex_metadata_item *file_metadata = apex_load_metadata_from_file(metadata_file_path);
+    if (file_metadata) {
+        apex_apply_metadata_to_options(file_metadata, &opts);
+
+        assert_option_bool(opts.enable_indices, false, "metadata file: indices: false");
+        assert_option_bool(opts.enable_wiki_links, true, "metadata file: wikilinks: true");
+        assert_option_bool(opts.pretty, true, "metadata file: pretty: true");
+        assert_option_bool(opts.standalone, true, "metadata file: standalone: true");
+        assert_option_string(opts.document_title, "Test Document from File", "metadata file: title");
+        assert_option_string(opts.csl_file, "test.csl", "metadata file: csl");
+        assert_option_bool(opts.id_format == 2, true, "metadata file: id-format: kramdown sets id_format to 2");
+        assert_option_bool(opts.link_citations, true, "metadata file: link-citations: true");
+        assert_option_bool(opts.suppress_bibliography, false, "metadata file: suppress-bibliography: false");
+
+        apex_free_metadata(file_metadata);
+    } else {
+        tests_run++;
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " metadata file: Failed to load metadata_options.yml\n");
+    }
+#endif
+}
+
+/**
  * Main test runner
  */
 int main(int argc, char *argv[]) {
@@ -3010,6 +3235,7 @@ int main(int argc, char *argv[]) {
     test_metadata();
     test_metadata_transforms();
     test_mmd_metadata_keys();
+    test_metadata_control_options();
     test_wiki_links();
     test_math();
     test_critic_markup();
