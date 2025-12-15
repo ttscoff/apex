@@ -1,5 +1,5 @@
 
-[![Version: 0.1.26](https://img.shields.io/badge/Version-0.1.26-528c9e)](https://github.com/ttscoff/apex/releases/latest) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version: 0.1.26](https://img.shields.io/badge/Version-0.1.26-528c9e)](https://github.com/ApexMarkdown/apex/releases/latest) ![](https://img.shields.io/badge/CMake-064F8C?style=for-the-badge&logo=cmake&logoColor=white) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
 # Apex
@@ -7,7 +7,9 @@
 
 Apex is a unified Markdown processor that combines the best features from CommonMark, GitHub Flavored Markdown (GFM), MultiMarkdown, Kramdown, and Marked. One processor to rule them all.
 
+
 ![](apex-header-2-rb@2x.webp)
+
 
 There are so many variations of Markdown, extending its features in all kinds of ways. But picking one flavor means giving up the features of another flavor. So I'm building Apex with the goal of making all of the most popular features of various processors available in one tool.
 
@@ -28,7 +30,7 @@ There are so many variations of Markdown, extending its features in all kinds of
 - **Strikethrough**: `~~text~~` syntax from GFM
 - **Smart typography**: Automatic conversion of quotes, dashes, ellipses, and more
 - **Math support**: LaTeX math expressions with `$...$` (inline) and `$$...$$` (display)
-- **Wiki links**: `[[Page Name]]` and `[[Page Name|Display Text]]` syntax
+- **Wiki links**: `[[Page Name]]`, `[[Page Name|Display Text]]`, and `[[Page Name#Section]]` syntax with configurable link targets via `--wikilink-space` and `--wikilink-extension`
 - **Abbreviations**: Three syntaxes (classic MMD, MMD 6 reference, MMD 6 inline)
 - **Callouts**: Bear/Obsidian-style callouts with collapsible support (`> [!NOTE]`, `> [!WARNING]`, etc.)
 - **GitHub emoji**: 350+ emoji support (`:rocket:`, `:heart:`, etc.)
@@ -37,10 +39,10 @@ There are so many variations of Markdown, extending its features in all kinds of
 
 - **Metadata blocks**: YAML front matter, MultiMarkdown metadata, and Pandoc title blocks
 - **Metadata variables**: Insert metadata values with `[%key]` syntax
-- **Metadata transforms**: Transform metadata values with `[%key:transform]` syntax - supports case conversion, string manipulation, regex replacement, date formatting, and more. See [Metadata Transforms](https://github.com/ttscoff/apex/wiki/Metadata-Transforms) for complete documentation
-- **Metadata control of options**: Control command-line options via metadata - set boolean flags (`indices: false`, `wikilinks: true`) and string options (`bibliography: refs.bib`, `title: My Document`) directly in document metadata for per-document configuration
-- **Table of Contents**: Automatic TOC generation with depth control (`<!--TOC-->`, `{{TOC}}`)
-- **File includes**: Three syntaxes (Marked `<<[file]`, MultiMarkdown `{{file}}`, iA Writer `/file`)
+- **Metadata transforms**: Transform metadata values with `[%key:transform]` syntax - supports case conversion, string manipulation, regex replacement, date formatting, and more. See [Metadata Transforms](https://github.com/ApexMarkdown/apex/wiki/Metadata-Transforms) for complete documentation
+- **Metadata control of options**: Control command-line options via metadata - set boolean flags (`indices: false`, `wikilinks: true`) and string options (`bibliography: refs.bib`, `title: My Document`, `wikilink-space: dash`, `wikilink-extension: html`) directly in document metadata for per-document configuration
+- **Table of Contents**: Automatic TOC generation with depth control using HTML (`<!--TOC-->`), MMD (`{{TOC}}` / `{{TOC:2-4}}`), and Kramdown `{:toc}` markers. Headings marked with `{:.no_toc}` are excluded from the generated TOC.
+- **File includes**: Three syntaxes (Marked `<<[file]`, MultiMarkdown `{{file}}`, iA Writer `/file`), with support for address ranges and wildcard/glob patterns such as `{{file.*}}`, `{{*.md}}`, and `{{c?de.py}}`.
 - **CSV/TSV support**: Automatic table conversion from CSV and TSV files
 - **Inline Attribute Lists (IAL)**: Kramdown-style attributes `{: #id .class}`
 - **Special markers**: Page breaks (`<!--BREAK-->`), autoscroll pauses (`<!--PAUSE:N-->`), end-of-block markers
@@ -89,6 +91,10 @@ There are so many variations of Markdown, extending its features in all kinds of
 - **Autolinks**: Automatic URL detection and linking
 - **Superscript/Subscript**: Support for `^superscript^` and `~subscript~` syntax
 
+### Extensibility and Plugins
+
+Apex supports a flexible plugin system that lets you add new syntax and post-processing features in any language while keeping the core parser stable and fast. Plugins are disabled by default so there is no performance impact unless you opt in. Enable them per run with `--plugins`, or per document with a `plugins: true` (or `enable-plugins: true`) key in your metadata. For a complete guide to writing and installing plugins, see the [Plugins](https://github.com/ApexMarkdown/apex/wiki/Plugins) page in the Apex Wiki.
+
 ## Installation
 
 ### Homebrew (macOS/Linux)
@@ -101,7 +107,7 @@ brew install ttscoff/thelab/apex
 ### Building from Source
 
 ```bash
-git clone https://github.com/ttscoff/apex.git
+git clone https://github.com/ApexMarkdown/apex.git
 cd apex
 git submodule update --init --recursive
 make
@@ -119,7 +125,7 @@ make install
 
 ### Pre-built Binaries
 
-Download pre-built binaries from the [latest release](https://github.com/ttscoff/apex/releases/latest). Binaries are available for:
+Download pre-built binaries from the [latest release](https://github.com/ApexMarkdown/apex/releases/latest). Binaries are available for:
 
 - macOS (Universal binary for arm64 and x86_64)
 - Linux (x86_64 and arm64)
@@ -177,11 +183,14 @@ apex input.md --mode kramdown
 - `--indices` - Enable index processing (mmark and TextIndex syntax)
 - `--no-indices` - Disable index processing
 - `--no-index` - Suppress index generation (markers still created)
+- `--wikilinks` - Enable wiki link syntax `[[Page]]`, `[[Page|Display]]`, and `[[Page#Section]]`
+- `--wikilink-space MODE` - Control how spaces in wiki link page names are converted (`dash`, `none`, `underscore`, `space`; default: `dash`)
+- `--wikilink-extension EXT` - File extension to append to wiki link URLs (e.g. `html`, `md`)
 
 ### All Options
 
 ```
-Apex Markdown Processor v0.1.25
+Apex Markdown Processor v0.1.26
 One Markdown processor to rule them all
 
 Usage: build/apex [options] [file]
@@ -208,11 +217,16 @@ Options:
   --pretty               Pretty-print HTML with indentation and whitespace
   --[no-]autolink        Enable autolinking of URLs and email addresses
   --obfuscate-emails     Obfuscate email links/text using HTML entities
+  --[no-]plugins         Enable or disable external/plugin processing (default: off)
+  --list-plugins         List available plugins from the remote directory
+  --install-plugin ID    Install plugin with given id from the remote directory
   --[no-]relaxed-tables  Enable relaxed table parsing (no separator rows required)
   --[no-]sup-sub         Enable MultiMarkdown-style superscript (^text^) and subscript (~text~) syntax
   --[no-]transforms      Enable metadata variable transforms [%key:transform] (enabled by default in unified mode)
   --[no-]unsafe          Allow raw HTML in output (default: true for unified/mmd/kramdown, false for commonmark/gfm)
   --[no-]wikilinks       Enable wiki link syntax [[PageName]] (disabled by default)
+  --wikilink-space MODE  Space replacement for wiki links: dash, none, underscore, space (default: dash)
+  --wikilink-extension EXT  File extension to append to wiki links (e.g., html, md)
   --embed-images         Embed local images as base64 data URLs in HTML output
   --base-dir DIR         Base directory for resolving relative paths (for images, includes, wiki links)
   --bibliography FILE     Bibliography file (BibTeX, CSL JSON, or CSL YAML) - can be used multiple times
@@ -253,13 +267,13 @@ This allows you to process multiple files with `apex *.md` and have each file us
 
 ## Documentation
 
-For complete documentation, see the [Apex Wiki](https://github.com/ttscoff/apex/wiki).
+For complete documentation, see the [Apex Wiki](https://github.com/ApexMarkdown/apex/wiki).
 
 Key documentation pages:
 
-- [Citations and Bibliography](https://github.com/ttscoff/apex/wiki/Citations) - Complete guide to citations and bibliographies
-- [Command Line Options](https://github.com/ttscoff/apex/wiki/Command-Line-Options) - All CLI flags explained
-- [Syntax Reference](https://github.com/ttscoff/apex/wiki/Syntax) - Complete syntax reference
+- [Citations and Bibliography](https://github.com/ApexMarkdown/apex/wiki/Citations) - Complete guide to citations and bibliographies
+- [Command Line Options](https://github.com/ApexMarkdown/apex/wiki/Command-Line-Options) - All CLI flags explained
+- [Syntax Reference](https://github.com/ApexMarkdown/apex/wiki/Syntax) - Complete syntax reference
 
 ## Contributing
 
@@ -273,4 +287,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE]([LICENSE](https://github.com/ttscoff/apex/blob/main/LICENSE)) file for details.
+This project is licensed under the MIT License - see the [LICENSE]([LICENSE](https://github.com/ApexMarkdown/apex/blob/main/LICENSE)) file for details.

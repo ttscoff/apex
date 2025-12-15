@@ -2,6 +2,62 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.28] - 2025-12-15
+
+### Changed
+
+- Default wikilink URLs now replace spaces with dashes (e.g. [[Home Page]] -> href="Home-Page").
+
+### New
+
+- Add --wikilink-space and --wikilink-extension flags to control how [[WikiLink]] hrefs are generated.
+- Allow wikilink space and extension configuration via metadata keys wikilink-space and wikilink-extension.
+- Support Kramdown-style {:toc ...} markers mapped to Apex TOC generation.
+- Add tests for `{:toc}` syntaxes
+- MMD includes support full glob patterns like {{*.md}} and {{c?de.py}}.
+- Add plugin discovery from .apex/plugins and ~/.config/apex/plugins.
+- Allow external handler plugins in any language via JSON stdin/stdout.
+- Support declarative regex plugins for pre_parse and post_render phases.
+- Add `--no-plugins` CLI flag to disable all plugins for a run.
+- Support `plugins: true/false` metadata to enable or disable plugins.
+- Initial planning for a remote plugin directory and install features
+
+### Improved
+
+- Exclude headings with .no_toc class from generated tables of contents for finer-grained TOC control.
+- MMD-style {{file.*}} now resolves preferred extensions before globbing.
+- Transclusion respects brace-style patterns such as {{{intro,part1}.md}} where supported.
+- Provide `APEX_PLUGIN_DIR` and `APEX_SUPPORT_DIR` for plugin code and data.
+- Add profiling (APEX_PROFILE_PLUGINS=1) for plugins
+
+## [0.1.27] - 2025-12-15
+
+### Changed
+
+- Default wikilink URLs now replace spaces with dashes (e.g. [[Home Page]] -> href="Home-Page").
+
+### New
+
+- Add --wikilink-space and --wikilink-extension flags to control how [[WikiLink]] hrefs are generated.
+- Allow wikilink space and extension configuration via metadata keys wikilink-space and wikilink-extension.
+- Support Kramdown-style {:toc ...} markers mapped to Apex TOC generation.
+- Add tests for `{:toc}` syntaxes
+- MMD includes support full glob patterns like {{*.md}} and {{c?de.py}}.
+- Add plugin discovery from .apex/plugins and ~/.config/apex/plugins.
+- Allow external handler plugins in any language via JSON stdin/stdout.
+- Support declarative regex plugins for pre_parse and post_render phases.
+- Add `--no-plugins` CLI flag to disable all plugins for a run.
+- Support `plugins: true/false` metadata to enable or disable plugins.
+- Initial planning for a remote plugin directory and install features
+
+### Improved
+
+- Exclude headings with .no_toc class from generated tables of contents for finer-grained TOC control.
+- MMD-style {{file.*}} now resolves preferred extensions before globbing.
+- Transclusion respects brace-style patterns such as {{{intro,part1}.md}} where supported.
+- Provide `APEX_PLUGIN_DIR` and `APEX_SUPPORT_DIR` for plugin code and data.
+- Add profiling (APEX_PROFILE_PLUGINS=1) for plugins
+
 ## [0.1.26] - 2025-12-14
 
 ### Changed
@@ -368,6 +424,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 - Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.28]: https://github.com/ttscoff/apex/releases/tag/v0.1.28
+[0.1.27]: https://github.com/ttscoff/apex/releases/tag/v0.1.27
 [0.1.26]: https://github.com/ttscoff/apex/releases/tag/v0.1.26
 [0.1.25]: https://github.com/ttscoff/apex/releases/tag/v0.1.25
 [0.1.24]: https://github.com/ttscoff/apex/releases/tag/v0.1.24
