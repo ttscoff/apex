@@ -41,6 +41,7 @@ set(APEX_LIB_SOURCES
     src/apex.c
     src/plugins_env.c
     src/plugins.c
+    src/plugins_remote.c
     src/html_renderer.c
     src/extensions/metadata.c
     src/extensions/wiki_links.c

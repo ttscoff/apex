@@ -47,7 +47,11 @@ static double apex_plugins_time_ms(void) {
 
 struct apex_plugin {
     char *id;
+    char *title;
+    char *author;
     char *description;
+    char *homepage;
+    char *repo;
     apex_plugin_phase_mask phases;
     int priority;
     char *handler_command;
@@ -73,7 +77,11 @@ static void free_plugin(struct apex_plugin *p) {
     while (p) {
         struct apex_plugin *next = p->next;
         free(p->id);
+        free(p->title);
+        free(p->author);
         free(p->description);
+        free(p->homepage);
+        free(p->repo);
         free(p->handler_command);
         free(p->pattern);
         free(p->replacement);
@@ -236,6 +244,8 @@ static void load_plugins_from_dir(apex_plugin_manager *manager,
         if (!meta) continue;
 
         const char *id = NULL;
+        const char *title = NULL;
+        const char *author = NULL;
         const char *description = NULL;
         const char *phase = NULL;
         const char *handler_command = NULL;
@@ -244,10 +254,16 @@ static void load_plugins_from_dir(apex_plugin_manager *manager,
         const char *pattern_str = NULL;
         const char *replacement_str = NULL;
         const char *flags_str = NULL;
+        const char *homepage = NULL;
+        const char *repo = NULL;
 
         for (apex_metadata_item *m = meta; m; m = m->next) {
             if (strcmp(m->key, "id") == 0) id = m->value;
+            else if (strcmp(m->key, "title") == 0) title = m->value;
+            else if (strcmp(m->key, "author") == 0) author = m->value;
             else if (strcmp(m->key, "description") == 0) description = m->value;
+            else if (strcmp(m->key, "homepage") == 0) homepage = m->value;
+            else if (strcmp(m->key, "repo") == 0) repo = m->value;
             else if (strcmp(m->key, "phase") == 0) phase = m->value;
             else if (strcmp(m->key, "handler.command") == 0) handler_command = m->value;
             else if (strcmp(m->key, "handler_command") == 0) handler_command = m->value;
@@ -276,7 +292,11 @@ static void load_plugins_from_dir(apex_plugin_manager *manager,
             continue;
         }
         p->id = final_id ? strdup(final_id) : NULL;
+        p->title = title ? strdup(title) : NULL;
+        p->author = author ? strdup(author) : NULL;
         p->description = description ? strdup(description) : NULL;
+        p->homepage = homepage ? strdup(homepage) : NULL;
+        p->repo = repo ? strdup(repo) : NULL;
         p->phases = phase_mask;
         p->handler_command = handler_command ? strdup(handler_command) : NULL;
         p->priority = priority_str ? atoi(priority_str) : 100;
@@ -301,7 +321,11 @@ static void load_plugins_from_dir(apex_plugin_manager *manager,
             if (regcomp(&p->regex, pattern_str, cflags) != 0) {
                 /* Invalid regex, skip this plugin */
                 free(p->id);
+                free(p->title);
+                free(p->author);
                 free(p->description);
+                free(p->homepage);
+                free(p->repo);
                 free(p);
                 apex_free_metadata(meta);
                 continue;

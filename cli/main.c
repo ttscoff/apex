@@ -12,6 +12,16 @@
 #include <libgen.h>
 #include <sys/time.h>
 
+/* Remote plugin directory helpers (from plugins_remote.c) */
+typedef struct apex_remote_plugin apex_remote_plugin;
+typedef struct apex_remote_plugin_list apex_remote_plugin_list;
+
+apex_remote_plugin_list *apex_remote_fetch_directory(const char *url);
+void apex_remote_print_plugins(apex_remote_plugin_list *list);
+apex_remote_plugin *apex_remote_find_plugin(apex_remote_plugin_list *list, const char *id);
+void apex_remote_free_plugins(apex_remote_plugin_list *list);
+const char *apex_remote_plugin_repo(apex_remote_plugin *p);
+
 /* Profiling helpers (same as in apex.c) */
 static double get_time_ms(void) {
     struct timeval tv;
@@ -63,6 +73,8 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  --[no-]autolink        Enable autolinking of URLs and email addresses\n");
     fprintf(stderr, "  --obfuscate-emails     Obfuscate email links/text using HTML entities\n");
     fprintf(stderr, "  --[no-]plugins         Enable or disable external/plugin processing (default: off)\n");
+    fprintf(stderr, "  --list-plugins         List available plugins from the remote directory\n");
+    fprintf(stderr, "  --install-plugin ID    Install plugin with given id from the remote directory\n");
     fprintf(stderr, "  --[no-]relaxed-tables  Enable relaxed table parsing (no separator rows required)\n");
     fprintf(stderr, "  --[no-]sup-sub         Enable MultiMarkdown-style superscript (^text^) and subscript (~text~) syntax\n");
     fprintf(stderr, "  --[no-]transforms      Enable metadata variable transforms [%%key:transform] (enabled by default in unified mode)\n");
@@ -175,6 +187,8 @@ int main(int argc, char *argv[]) {
     apex_options options = apex_options_default();
     bool plugins_cli_override = false;
     bool plugins_cli_value = false;
+    bool list_plugins = false;
+    const char *install_plugin_id = NULL;
     const char *input_file = NULL;
     const char *output_file = NULL;
     const char *meta_file = NULL;
@@ -227,6 +241,14 @@ int main(int argc, char *argv[]) {
             options.enable_plugins = false;
             plugins_cli_override = true;
             plugins_cli_value = false;
+        } else if (strcmp(argv[i], "--list-plugins") == 0) {
+            list_plugins = true;
+        } else if (strcmp(argv[i], "--install-plugin") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --install-plugin requires an id argument\n");
+                return 1;
+            }
+            install_plugin_id = argv[i];
         } else if (strcmp(argv[i], "--no-tables") == 0) {
             options.enable_tables = false;
         } else if (strcmp(argv[i], "--no-footnotes") == 0) {
@@ -432,6 +454,83 @@ int main(int argc, char *argv[]) {
         } else {
             /* Assume it's the input file */
             input_file = argv[i];
+        }
+    }
+
+    /* Handle plugin listing/installation commands before normal conversion */
+    if (list_plugins || install_plugin_id) {
+        const char *dir_url = "https://raw.githubusercontent.com/ApexMarkdown/plugins/refs/heads/main/apex-plugins.json";
+        apex_remote_plugin_list *plist = apex_remote_fetch_directory(dir_url);
+        if (!plist) {
+            fprintf(stderr, "Error: failed to fetch plugin directory from %s\n", dir_url);
+            return 1;
+        }
+        if (list_plugins) {
+            apex_remote_print_plugins(plist);
+            apex_remote_free_plugins(plist);
+            return 0;
+        }
+        if (install_plugin_id) {
+            apex_remote_plugin *rp = apex_remote_find_plugin(plist, install_plugin_id);
+            const char *repo = apex_remote_plugin_repo(rp);
+            if (!rp || !repo) {
+                fprintf(stderr, "Error: plugin '%s' not found in directory.\n", install_plugin_id);
+                apex_remote_free_plugins(plist);
+                return 1;
+            }
+
+            /* Determine plugins root: $XDG_CONFIG_HOME/apex/plugins or ~/.config/apex/plugins */
+            const char *xdg = getenv("XDG_CONFIG_HOME");
+            char root[1024];
+            if (xdg && *xdg) {
+                snprintf(root, sizeof(root), "%s/apex/plugins", xdg);
+            } else {
+                const char *home = getenv("HOME");
+                if (!home || !*home) {
+                    fprintf(stderr, "Error: HOME not set; cannot determine plugin install directory.\n");
+                    apex_remote_free_plugins(plist);
+                    return 1;
+                }
+                snprintf(root, sizeof(root), "%s/.config/apex/plugins", home);
+            }
+
+            /* Ensure root directory exists */
+            char mkdir_cmd[1200];
+            snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p \"%s\"", root);
+            int mkrc = system(mkdir_cmd);
+            if (mkrc != 0) {
+                fprintf(stderr, "Error: failed to create plugin directory '%s'.\n", root);
+                apex_remote_free_plugins(plist);
+                return 1;
+            }
+
+            /* Final target path */
+            char target[1200];
+            snprintf(target, sizeof(target), "%s/%s", root, install_plugin_id);
+
+            /* Refuse to overwrite existing directory for now */
+            char test_cmd[1300];
+            snprintf(test_cmd, sizeof(test_cmd), "[ -d \"%s\" ]", target);
+            int exists_rc = system(test_cmd);
+            if (exists_rc == 0) {
+                fprintf(stderr, "Error: plugin directory '%s' already exists. Remove it first to reinstall.\n", target);
+                apex_remote_free_plugins(plist);
+                return 1;
+            }
+
+            /* Clone repo using git */
+            char clone_cmd[2048];
+            snprintf(clone_cmd, sizeof(clone_cmd), "git clone \"%s\" \"%s\"", repo, target);
+            int git_rc = system(clone_cmd);
+            if (git_rc != 0) {
+                fprintf(stderr, "Error: git clone failed for '%s'. Is git installed and the URL correct?\n", repo);
+                apex_remote_free_plugins(plist);
+                return 1;
+            }
+
+            fprintf(stderr, "Installed plugin '%s' into %s\n", install_plugin_id, target);
+            apex_remote_free_plugins(plist);
+            return 0;
         }
     }
 
