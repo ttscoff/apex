@@ -2,6 +2,13 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.36] - 2025-12-16
+
+### Fixed
+
+- Resolve CMake error when building framework where file(GLOB) returns multiple dylib files, causing semicolon-concatenated paths in file(COPY) command. Now extracts first file from glob result before copying.
+- Homebrew installation now correctly links to system libyaml instead of hardcoded CI path
+
 ## [0.1.35] - 2025-12-16
 
 ### Changed
@@ -493,6 +500,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 - Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.36]: https://github.com/ttscoff/apex/releases/tag/v0.1.36
 [0.1.35]: https://github.com/ttscoff/apex/releases/tag/v0.1.35
 [0.1.34]: https://github.com/ttscoff/apex/releases/tag/v0.1.34
 [0.1.33]: https://github.com/ttscoff/apex/releases/tag/v0.1.33

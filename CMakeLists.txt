@@ -6,7 +6,7 @@ if(POLICY CMP0000)
 endif()
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version" FORCE)
 
-project(apex VERSION 0.1.35 LANGUAGES C)
+project(apex VERSION 0.1.36 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
