@@ -5,44 +5,25 @@
 #   brew install apex
 
 class Apex < Formula
-  desc 'Unified Markdown processor supporting CommonMark, GFM, MultiMarkdown, and Kramdown'
-  homepage 'https://github.com/ApexMarkdown/apex'
-  url 'https://github.com/ApexMarkdown/apex.git',
-      tag: 'v0.1.33',
-      revision: 'accc18ae4e17b8e99953a3b55984c9f13b373cb6'
-  version '0.1.33'
-  license 'MIT'
+  desc "Unified Markdown processor supporting CommonMark, GFM, MultiMarkdown, and Kramdown"
+  homepage "https://github.com/ApexMarkdown/apex"
+  version "0.1.34"
+  license "MIT"
 
-  depends_on 'cmake' => :build
-  depends_on 'libyaml'
+  depends_on "libyaml"
 
-  # On macOS, Xcode command line tools are usually sufficient
-  # but we can require Xcode if needed for framework builds
   on_macos do
-    depends_on xcode: :build
+    url "https://github.com/ApexMarkdown/apex/releases/download/v#{version}/apex-#{version}-macos-universal.tar.gz"
+    sha256 "d23c5c54bfd483505bcef0ff8369d25a94929ce560b5a913631d79aa8a49da93"
   end
 
   def install
-    # Configure with CMake in a separate build directory
-    system 'cmake', '-S', '.', '-B', 'build',
-           '-DCMAKE_BUILD_TYPE=Release',
-           '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'
-
-    # Build CLI executable (not framework)
-    # Man page is pre-generated in the repository
-    system 'cmake', '--build', 'build', '--target', 'apex_cli'
-
-    # Install binary and man page
-    bin.install 'build/apex'
-    man1.install 'man/apex.1'
+    bin.install "apex"
   end
 
   test do
-    # Test basic functionality
-    (testpath / 'test.md').write("# Hello World\n")
-    assert_match '<h1 id="hello-world">Hello World</h1>', shell_output("#{bin}/apex test.md")
-
-    # Test version
+    (testpath / "test.md").write("# Hello World\n")
+    assert_match "<h1 id=\"hello-world\">Hello World</h1>", shell_output("#{bin}/apex test.md")
     assert_match version.to_s, shell_output("#{bin}/apex --version", 2)
   end
 end
