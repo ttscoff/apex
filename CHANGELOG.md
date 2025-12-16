@@ -2,6 +2,8 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.32] - 2025-12-16
+
 ## [0.1.31] - 2025-12-16
 
 ## [0.1.30] - 2025-12-16
@@ -475,6 +477,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 - Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.32]: https://github.com/ttscoff/apex/releases/tag/v0.1.32
 [0.1.31]: https://github.com/ttscoff/apex/releases/tag/v0.1.31
 [0.1.30]: https://github.com/ttscoff/apex/releases/tag/v0.1.30
 [0.1.29]: https://github.com/ttscoff/apex/releases/tag/v0.1.29
