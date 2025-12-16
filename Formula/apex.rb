@@ -14,6 +14,7 @@ class Apex < Formula
   license 'MIT'
 
   depends_on 'cmake' => :build
+  depends_on 'libyaml'
 
   # On macOS, Xcode command line tools are usually sufficient
   # but we can require Xcode if needed for framework builds

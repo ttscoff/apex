@@ -14,6 +14,10 @@
 #include "cmark-gfm-extension_api.h"
 #include "../../include/apex/apex.h"
 
+#ifdef APEX_HAVE_LIBYAML
+#include <yaml.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -95,6 +99,23 @@ apex_metadata_item *apex_merge_metadata(apex_metadata_item *first, ...);
  * Modifies the options structure in-place
  */
 void apex_apply_metadata_to_options(apex_metadata_item *metadata, apex_options *options);
+
+#ifdef APEX_HAVE_LIBYAML
+/**
+ * Load YAML document from file and return structured representation
+ * Returns a yaml_document_t pointer (caller must delete with yaml_document_delete)
+ * Returns NULL on error
+ */
+yaml_document_t *apex_load_yaml_document(const char *filepath);
+
+/**
+ * Extract bundle array from plugin manifest YAML
+ * Returns array of metadata item lists, one per bundle entry
+ * Caller must free each list with apex_free_metadata, then free the array itself
+ * Returns NULL if no bundle key found or on error
+ */
+apex_metadata_item **apex_extract_plugin_bundle(const char *filepath, size_t *count);
+#endif
 
 #ifdef __cplusplus
 }

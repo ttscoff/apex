@@ -20,12 +20,60 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
+# Find libyaml for YAML parsing (arrays, nested structures)
+#
+# We try a few common pkg-config names in order:
+#   - yaml-0.1  (Homebrew / many distros)
+#   - yaml      (some distros)
+#   - libyaml   (fallback)
+#
+# If that fails, we fall back to find_package(yaml).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(YAML yaml-0.1 QUIET)
+    if(NOT YAML_FOUND)
+        pkg_check_modules(YAML yaml QUIET)
+    endif()
+    if(NOT YAML_FOUND)
+        pkg_check_modules(YAML libyaml QUIET)
+    endif()
+endif()
+
+if(NOT YAML_FOUND)
+    find_package(yaml QUIET)
+    if(yaml_FOUND)
+        set(YAML_LIBRARIES yaml)
+        set(YAML_INCLUDE_DIRS ${yaml_INCLUDE_DIRS})
+        set(YAML_FOUND TRUE)
+    endif()
+endif()
+
+if(NOT YAML_FOUND)
+    message(WARNING "libyaml not found. YAML arrays and nested structures will not be supported.")
+    message(STATUS "  Install libyaml-dev (Debian/Ubuntu) or libyaml-devel (RHEL/Fedora) or libyaml (Homebrew)")
+    set(YAML_FOUND FALSE)
+else()
+    message(STATUS "libyaml: Found")
+    message(STATUS "  Libraries: ${YAML_LIBRARIES}")
+    message(STATUS "  Include dirs: ${YAML_INCLUDE_DIRS}")
+endif()
+
 # Build cmark-gfm as a subdirectory
 # Disable cmark-gfm tests and programs
 set(CMARK_TESTS OFF CACHE BOOL "Build cmark tests" FORCE)
 set(CMARK_STATIC ON CACHE BOOL "Build static library" FORCE)
 set(CMARK_SHARED ON CACHE BOOL "Build shared library" FORCE)
 add_subdirectory(vendor/cmark-gfm)
+
+# Silence noisy warnings from vendored cmark-gfm extensions
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    if(TARGET libcmark-gfm-extensions)
+        target_compile_options(libcmark-gfm-extensions PRIVATE -Wno-unused-parameter)
+    endif()
+    if(TARGET libcmark-gfm-extensions_static)
+        target_compile_options(libcmark-gfm-extensions_static PRIVATE -Wno-unused-parameter)
+    endif()
+endif()
 
 # Include directories
 include_directories(
@@ -34,6 +82,12 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/vendor/cmark-gfm/extensions
     ${CMAKE_BINARY_DIR}/vendor/cmark-gfm/src  # For generated headers
 )
+
+if(YAML_FOUND)
+    include_directories(${YAML_INCLUDE_DIRS})
+    link_directories(${YAML_LIBRARY_DIRS})
+    add_compile_definitions(APEX_HAVE_LIBYAML=1)
+endif()
 
 
 # Library source files
@@ -76,7 +130,11 @@ set_target_properties(apex PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
     PUBLIC_HEADER include/apex/apex.h
 )
-target_link_libraries(apex libcmark-gfm-extensions libcmark-gfm)
+if(YAML_FOUND)
+    target_link_libraries(apex libcmark-gfm-extensions libcmark-gfm ${YAML_LIBRARIES})
+else()
+    target_link_libraries(apex libcmark-gfm-extensions libcmark-gfm)
+endif()
 
 # Build static library
 add_library(apex_static STATIC ${APEX_LIB_SOURCES})
@@ -84,12 +142,20 @@ set_target_properties(apex_static PROPERTIES
     OUTPUT_NAME apex
     PUBLIC_HEADER include/apex/apex.h
 )
-target_link_libraries(apex_static libcmark-gfm-extensions_static libcmark-gfm_static)
+if(YAML_FOUND)
+    target_link_libraries(apex_static libcmark-gfm-extensions_static libcmark-gfm_static ${YAML_LIBRARIES})
+else()
+    target_link_libraries(apex_static libcmark-gfm-extensions_static libcmark-gfm_static)
+endif()
 
 # CLI executable
 add_executable(apex_cli cli/main.c)
 set_target_properties(apex_cli PROPERTIES OUTPUT_NAME apex)
-target_link_libraries(apex_cli apex_static libcmark-gfm-extensions_static libcmark-gfm_static)
+if(YAML_FOUND)
+    target_link_libraries(apex_cli apex_static libcmark-gfm-extensions_static libcmark-gfm_static ${YAML_LIBRARIES})
+else()
+    target_link_libraries(apex_cli apex_static libcmark-gfm-extensions_static libcmark-gfm_static)
+endif()
 
 # Installation
 install(TARGETS apex apex_static apex_cli
@@ -114,7 +180,11 @@ if(APPLE)
             PUBLIC_HEADER include/apex/apex.h
             OUTPUT_NAME Apex
         )
-        target_link_libraries(apex_framework libcmark-gfm libcmark-gfm-extensions)
+        if(YAML_FOUND)
+            target_link_libraries(apex_framework libcmark-gfm libcmark-gfm-extensions ${YAML_LIBRARIES})
+        else()
+            target_link_libraries(apex_framework libcmark-gfm libcmark-gfm-extensions)
+        endif()
         install(TARGETS apex_framework
             FRAMEWORK DESTINATION /Library/Frameworks
         )

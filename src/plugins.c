@@ -10,6 +10,10 @@
 #include <sys/time.h>
 #include <stdio.h>
 
+#ifdef APEX_HAVE_LIBYAML
+#include <yaml.h>
+#endif
+
 /* External command runner for plugins (from plugins_env.c) */
 char *apex_run_external_plugin_command(const char *cmd,
                                        const char *phase,
@@ -242,6 +246,151 @@ static void load_plugins_from_dir(apex_plugin_manager *manager,
 
         apex_metadata_item *meta = apex_load_metadata_from_file(manifest_path);
         if (!meta) continue;
+
+#ifdef APEX_HAVE_LIBYAML
+        /* Check for bundle array - if found, process each bundle entry as a separate plugin */
+        size_t bundle_count = 0;
+        apex_metadata_item **bundles = apex_extract_plugin_bundle(manifest_path, &bundle_count);
+        if (bundles && bundle_count > 0) {
+            /* Process each bundle entry as a plugin */
+            for (size_t b_idx = 0; b_idx < bundle_count; b_idx++) {
+                apex_metadata_item *bundle_meta = bundles[b_idx];
+                if (!bundle_meta) continue;
+
+                /* Merge bundle-level metadata (from top-level) with bundle entry metadata */
+                /* Bundle entry metadata takes precedence */
+                apex_metadata_item *merged = apex_merge_metadata(meta, bundle_meta, NULL);
+
+                /* Extract plugin fields from merged metadata */
+                const char *id = NULL;
+                const char *title = NULL;
+                const char *author = NULL;
+                const char *description = NULL;
+                const char *phase = NULL;
+                const char *handler_command = NULL;
+                const char *priority_str = NULL;
+                const char *timeout_str = NULL;
+                const char *pattern_str = NULL;
+                const char *replacement_str = NULL;
+                const char *flags_str = NULL;
+                const char *homepage = NULL;
+                const char *repo = NULL;
+
+                /* First, get bundle-level metadata (from top-level meta) */
+                for (apex_metadata_item *m = meta; m; m = m->next) {
+                    if (strcmp(m->key, "author") == 0) author = m->value;
+                    else if (strcmp(m->key, "homepage") == 0) homepage = m->value;
+                    else if (strcmp(m->key, "repo") == 0) repo = m->value;
+                }
+
+                /* Then, get bundle entry-specific metadata (overrides bundle-level) */
+                for (apex_metadata_item *m = merged; m; m = m->next) {
+                    if (strcmp(m->key, "id") == 0) id = m->value;
+                    else if (strcmp(m->key, "title") == 0) title = m->value;
+                    else if (strcmp(m->key, "author") == 0 && m->value) author = m->value;
+                    else if (strcmp(m->key, "description") == 0) description = m->value;
+                    else if (strcmp(m->key, "homepage") == 0 && m->value) homepage = m->value;
+                    else if (strcmp(m->key, "repo") == 0 && m->value) repo = m->value;
+                    else if (strcmp(m->key, "phase") == 0) phase = m->value;
+                    else if (strcmp(m->key, "handler.command") == 0) handler_command = m->value;
+                    else if (strcmp(m->key, "handler_command") == 0) handler_command = m->value;
+                    else if (strcmp(m->key, "priority") == 0) priority_str = m->value;
+                    else if (strcmp(m->key, "timeout_ms") == 0) timeout_str = m->value;
+                    else if (strcmp(m->key, "pattern") == 0) pattern_str = m->value;
+                    else if (strcmp(m->key, "replacement") == 0) replacement_str = m->value;
+                    else if (strcmp(m->key, "flags") == 0) flags_str = m->value;
+                }
+
+                if (!id || !phase) {
+                    apex_free_metadata(merged);
+                    continue;
+                }
+
+                int phase_mask = plugin_phase_mask_from_string(phase);
+                if (!(phase_mask & (APEX_PLUGIN_PHASE_PRE_PARSE | APEX_PLUGIN_PHASE_POST_RENDER))) {
+                    apex_free_metadata(merged);
+                    continue;
+                }
+
+                struct apex_plugin *p = calloc(1, sizeof(struct apex_plugin));
+                if (!p) {
+                    apex_free_metadata(merged);
+                    continue;
+                }
+                p->id = strdup(id);
+                p->title = title ? strdup(title) : NULL;
+                p->author = author ? strdup(author) : NULL;
+                p->description = description ? strdup(description) : NULL;
+                p->homepage = homepage ? strdup(homepage) : NULL;
+                p->repo = repo ? strdup(repo) : NULL;
+                p->phases = phase_mask;
+                p->handler_command = handler_command ? strdup(handler_command) : NULL;
+                p->priority = priority_str ? atoi(priority_str) : 100;
+                p->timeout_ms = timeout_str ? atoi(timeout_str) : 0;
+                p->has_regex = 0;
+                p->dir_path = strdup(plugin_dir);
+
+                /* Compute per-plugin support directory */
+                char *support_base = apex_get_support_base_dir();
+                if (support_base && id) {
+                    char supp[1024];
+                    snprintf(supp, sizeof(supp), "%s/%s", support_base, id);
+                    mkdir(supp, 0700);
+                    p->support_dir = strdup(supp);
+                }
+                if (support_base) free(support_base);
+
+                /* Compile declarative regex if provided */
+                if (!p->handler_command && pattern_str && replacement_str) {
+                    int cflags = REG_EXTENDED;
+                    if (flags_str && strchr(flags_str, 'i')) {
+                        cflags |= REG_ICASE;
+                    }
+                    if (regcomp(&p->regex, pattern_str, cflags) != 0) {
+                        free(p->id);
+                        free(p->title);
+                        free(p->author);
+                        free(p->description);
+                        free(p->homepage);
+                        free(p->repo);
+                        free(p);
+                        apex_free_metadata(merged);
+                        continue;
+                    }
+                    p->pattern = strdup(pattern_str);
+                    p->replacement = strdup(replacement_str);
+                    p->has_regex = 1;
+                }
+
+                /* Attach to appropriate phase lists */
+                if (phase_mask & APEX_PLUGIN_PHASE_PRE_PARSE) {
+                    if (!plugin_id_exists(manager->pre_parse, id)) {
+                        append_plugin_sorted(&manager->pre_parse, p);
+                    }
+                }
+                if (phase_mask & APEX_PLUGIN_PHASE_POST_RENDER) {
+                    if (!plugin_id_exists(manager->post_render, id)) {
+                        append_plugin_sorted(&manager->post_render, p);
+                    }
+                }
+
+                apex_free_metadata(merged);
+            }
+
+            /* Free bundle arrays */
+            for (size_t b_idx = 0; b_idx < bundle_count; b_idx++) {
+                if (bundles[b_idx]) {
+                    apex_free_metadata(bundles[b_idx]);
+                }
+            }
+            free(bundles);
+            apex_free_metadata(meta);
+            continue;  /* Skip single-plugin processing for bundle manifests */
+        }
+        if (bundles) {
+            free(bundles);
+        }
+#endif
 
         const char *id = NULL;
         const char *title = NULL;

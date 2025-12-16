@@ -13,6 +13,10 @@
 #include <stdarg.h>
 #include <time.h>
 #include <regex.h>
+
+#ifdef APEX_HAVE_LIBYAML
+#include <yaml.h>
+#endif
 #ifdef _POSIX_C_SOURCE
 /* strptime should be available if POSIX is defined */
 #elif defined(__APPLE__) || defined(__linux__)
@@ -99,12 +103,240 @@ static void add_metadata_item(apex_metadata_item **list, const char *key, const 
     *list = item;
 }
 
+#ifdef APEX_HAVE_LIBYAML
+/* Recursively convert libyaml node to flat metadata items */
+static void yaml_node_to_flat_items(yaml_document_t *doc, yaml_node_t *node,
+                                    const char *prefix, apex_metadata_item **items) {
+    if (!node) return;
+
+    switch (node->type) {
+        case YAML_SCALAR_NODE: {
+            char *value = (char *)node->data.scalar.value;
+            size_t value_len = node->data.scalar.length;
+            char *value_str = malloc(value_len + 1);
+            if (value_str) {
+                memcpy(value_str, value, value_len);
+                value_str[value_len] = '\0';
+                if (prefix && *prefix) {
+                    add_metadata_item(items, prefix, value_str);
+                }
+                free(value_str);
+            }
+            break;
+        }
+        case YAML_SEQUENCE_NODE: {
+            /* For arrays, normalize to comma-separated string for backward compatibility with transforms */
+            /* Collect all scalar values and join with ", " */
+            size_t scalar_count = 0;
+            char **scalar_values = NULL;
+            size_t scalar_cap = 0;
+
+            yaml_node_item_t *item = node->data.sequence.items.start;
+            while (item < node->data.sequence.items.top) {
+                yaml_node_t *child = yaml_document_get_node(doc, *item);
+                if (child && child->type == YAML_SCALAR_NODE) {
+                    if (scalar_count == scalar_cap) {
+                        size_t new_cap = scalar_cap ? scalar_cap * 2 : 8;
+                        char **tmp = realloc(scalar_values, new_cap * sizeof(char *));
+                        if (!tmp) {
+                            for (size_t i = 0; i < scalar_count; i++) free(scalar_values[i]);
+                            free(scalar_values);
+                            break;
+                        }
+                        scalar_values = tmp;
+                        scalar_cap = new_cap;
+                    }
+                    char *val = (char *)child->data.scalar.value;
+                    size_t val_len = child->data.scalar.length;
+                    scalar_values[scalar_count] = malloc(val_len + 1);
+                    if (scalar_values[scalar_count]) {
+                        memcpy(scalar_values[scalar_count], val, val_len);
+                        scalar_values[scalar_count][val_len] = '\0';
+                        scalar_count++;
+                    }
+                } else if (child && child->type != YAML_SCALAR_NODE) {
+                    /* Non-scalar in array - fall back to indexed keys */
+                    for (size_t i = 0; i < scalar_count; i++) free(scalar_values[i]);
+                    free(scalar_values);
+                    scalar_count = 0;
+                    scalar_values = NULL;
+                    scalar_cap = 0;
+
+                    /* Use indexed approach for complex arrays */
+                    int idx = 0;
+                    yaml_node_item_t *it = node->data.sequence.items.start;
+                    while (it < node->data.sequence.items.top) {
+                        char idx_key[512];
+                        if (prefix && *prefix) {
+                            snprintf(idx_key, sizeof(idx_key), "%s.%d", prefix, idx);
+                        } else {
+                            snprintf(idx_key, sizeof(idx_key), "%d", idx);
+                        }
+                        yaml_node_t *ch = yaml_document_get_node(doc, *it);
+                        if (ch) {
+                            yaml_node_to_flat_items(doc, ch, idx_key, items);
+                        }
+                        it++;
+                        idx++;
+                    }
+                    break;
+                }
+                item++;
+            }
+
+            /* If we collected scalars, join them with ", " */
+            if (scalar_count > 0 && scalar_values) {
+                size_t total_len = 0;
+                for (size_t i = 0; i < scalar_count; i++) {
+                    total_len += strlen(scalar_values[i]);
+                    if (i < scalar_count - 1) total_len += 2; /* ", " */
+                }
+                char *joined = malloc(total_len + 1);
+                if (joined && prefix && *prefix) {
+                    char *p = joined;
+                    for (size_t i = 0; i < scalar_count; i++) {
+                        size_t len = strlen(scalar_values[i]);
+                        memcpy(p, scalar_values[i], len);
+                        p += len;
+                        if (i < scalar_count - 1) {
+                            *p++ = ',';
+                            *p++ = ' ';
+                        }
+                    }
+                    *p = '\0';
+                    add_metadata_item(items, prefix, joined);
+                    free(joined);
+                }
+                for (size_t i = 0; i < scalar_count; i++) free(scalar_values[i]);
+                free(scalar_values);
+            }
+            break;
+        }
+        case YAML_MAPPING_NODE: {
+            yaml_node_pair_t *pair = node->data.mapping.pairs.start;
+            while (pair < node->data.mapping.pairs.top) {
+                yaml_node_t *key_node = yaml_document_get_node(doc, pair->key);
+                yaml_node_t *value_node = yaml_document_get_node(doc, pair->value);
+
+                if (key_node && key_node->type == YAML_SCALAR_NODE && value_node) {
+                    char *key = (char *)key_node->data.scalar.value;
+                    size_t key_len = key_node->data.scalar.length;
+                    char *key_str = malloc(key_len + 1);
+                    if (key_str) {
+                        memcpy(key_str, key, key_len);
+                        key_str[key_len] = '\0';
+
+                        char full_key[512];
+                        if (prefix && *prefix) {
+                            snprintf(full_key, sizeof(full_key), "%s.%s", prefix, key_str);
+                        } else {
+                            strncpy(full_key, key_str, sizeof(full_key) - 1);
+                            full_key[sizeof(full_key) - 1] = '\0';
+                        }
+
+                        yaml_node_to_flat_items(doc, value_node, full_key, items);
+                        free(key_str);
+                    }
+                }
+                pair++;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+/* Parse YAML using libyaml - returns flat metadata items for backward compatibility */
+static apex_metadata_item *parse_yaml_with_libyaml(const char *text, size_t text_len, size_t *consumed) {
+    yaml_parser_t parser;
+    yaml_document_t document;
+    apex_metadata_item *items = NULL;
+
+    /* Skip opening --- if present */
+    const char *yaml_start = text;
+    if (text_len >= 3 && strncmp(text, "---", 3) == 0) {
+        const char *newline = strchr(text + 3, '\n');
+        if (newline) {
+            yaml_start = newline + 1;
+        } else {
+            yaml_start = text + 3;
+        }
+    }
+
+    /* Find the end of YAML front matter (---) */
+    const char *end_marker = strstr(yaml_start, "\n---");
+    if (!end_marker) {
+        end_marker = strstr(yaml_start, "\n...");
+    }
+    if (!end_marker) {
+        /* Look for --- at start of line */
+        const char *p = yaml_start;
+        while ((p = strstr(p, "\n---")) != NULL) {
+            if (p[4] == '\n' || p[4] == '\0' || p[4] == '\r') {
+                end_marker = p;
+                break;
+            }
+            p += 4;
+        }
+    }
+
+    size_t yaml_content_len = text_len - (yaml_start - text);
+    if (end_marker && end_marker > yaml_start) {
+        yaml_content_len = (size_t)(end_marker - yaml_start);
+    }
+
+    if (!yaml_parser_initialize(&parser)) {
+        return NULL;
+    }
+
+    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml_start, yaml_content_len);
+
+    if (!yaml_parser_load(&parser, &document)) {
+        yaml_parser_delete(&parser);
+        return NULL;
+    }
+
+    yaml_node_t *yaml_root = yaml_document_get_root_node(&document);
+    if (!yaml_root || yaml_root->type != YAML_MAPPING_NODE) {
+        yaml_document_delete(&document);
+        yaml_parser_delete(&parser);
+        return NULL;
+    }
+
+    /* Calculate consumed bytes */
+    if (end_marker) {
+        *consumed = (end_marker - text) + 4; /* Include \n--- */
+    } else {
+        *consumed = text_len;
+    }
+
+    /* Convert YAML mapping to flat metadata items */
+    yaml_node_to_flat_items(&document, yaml_root, NULL, &items);
+
+    yaml_document_delete(&document);
+    yaml_parser_delete(&parser);
+    return items;
+}
+#endif
+
 /**
  * Parse YAML front matter
  * Format: --- at start, key: value pairs, --- to close
+ * If libyaml is available, attempts to use it for full YAML support (arrays, nested structures)
+ * Falls back to simple line-by-line parser for backward compatibility
  */
 static apex_metadata_item *parse_yaml_metadata(const char *text, size_t *consumed) {
     apex_metadata_item *items = NULL;
+#ifdef APEX_HAVE_LIBYAML
+    /* Try libyaml first for full YAML support */
+    size_t text_len = strlen(text);
+    items = parse_yaml_with_libyaml(text, text_len, consumed);
+    if (items) {
+        return items;
+    }
+    /* Fall through to simple parser if libyaml parsing failed */
+#endif
     const char *line_start = text;
     const char *line_end;
 
@@ -713,10 +945,8 @@ static bool parse_date(const char *date_str, struct tm *tm_out) {
     return false;
 }
 
-/**
- * Create string array from comma-separated string
- */
-static apex_string_array *split_string(const char *str, const char *delimiter) {
+/* Simple string split fallback (for when regex fails) */
+static apex_string_array *split_string_simple(const char *str, const char *delimiter) {
     if (!str) return NULL;
 
     apex_string_array *arr = calloc(1, sizeof(apex_string_array));
@@ -771,6 +1001,131 @@ static apex_string_array *split_string(const char *str, const char *delimiter) {
     }
 
     free(str_copy);
+    return arr;
+}
+
+/**
+ * Create string array from string using regex delimiter
+ */
+static apex_string_array *split_string(const char *str, const char *delimiter_pattern) {
+    if (!str) return NULL;
+
+    apex_string_array *arr = calloc(1, sizeof(apex_string_array));
+    if (!arr) return NULL;
+
+    arr->capacity = 8;
+    arr->items = malloc(arr->capacity * sizeof(char*));
+    if (!arr->items) {
+        free(arr);
+        return NULL;
+    }
+
+    const char *pattern = delimiter_pattern && delimiter_pattern[0] ? delimiter_pattern : "\\s+";
+
+    regex_t regex;
+    int ret = regcomp(&regex, pattern, REG_EXTENDED);
+    if (ret != 0) {
+        /* Regex compilation failed, fall back to simple string split */
+        free(arr->items);
+        free(arr);
+        const char *fallback = delimiter_pattern && delimiter_pattern[0] ? delimiter_pattern : ",";
+        return split_string_simple(str, fallback);
+    }
+
+    const char *search_pos = str;
+    regmatch_t matches[1];
+
+    while (regexec(&regex, search_pos, 1, matches, 0) == 0) {
+        /* Extract token before match */
+        size_t token_len = (size_t)matches[0].rm_so;
+        if (token_len > 0) {
+            if (arr->count >= arr->capacity) {
+                arr->capacity *= 2;
+                arr->items = realloc(arr->items, arr->capacity * sizeof(char*));
+                if (!arr->items) {
+                    regfree(&regex);
+                    free_string_array(arr);
+                    return NULL;
+                }
+            }
+
+            char *token = malloc(token_len + 1);
+            if (!token) {
+                regfree(&regex);
+                free_string_array(arr);
+                return NULL;
+            }
+            memcpy(token, search_pos, token_len);
+            token[token_len] = '\0';
+
+            /* Trim whitespace from token */
+            char *start = token;
+            while (*start && isspace((unsigned char)*start)) start++;
+            char *end = start + strlen(start);
+            while (end > start && isspace((unsigned char)*(end-1))) end--;
+            *end = '\0';
+
+            if (*start) {  /* Only add non-empty tokens */
+                arr->items[arr->count] = strdup(start);
+                if (!arr->items[arr->count]) {
+                    free(token);
+                    regfree(&regex);
+                    free_string_array(arr);
+                    return NULL;
+                }
+                arr->count++;
+            }
+            free(token);
+        }
+
+        search_pos += matches[0].rm_eo;
+        if (*search_pos == '\0') break;
+    }
+
+    /* Handle remaining text after last match */
+    if (*search_pos) {
+        size_t remaining_len = strlen(search_pos);
+        if (remaining_len > 0) {
+            if (arr->count >= arr->capacity) {
+                arr->capacity *= 2;
+                arr->items = realloc(arr->items, arr->capacity * sizeof(char*));
+                if (!arr->items) {
+                    regfree(&regex);
+                    free_string_array(arr);
+                    return NULL;
+                }
+            }
+
+            char *token = strdup(search_pos);
+            if (token) {
+                /* Trim whitespace */
+                char *start = token;
+                while (*start && isspace((unsigned char)*start)) start++;
+                char *end = start + strlen(start);
+                while (end > start && isspace((unsigned char)*(end-1))) end--;
+                *end = '\0';
+
+                if (*start) {
+                    arr->items[arr->count] = strdup(start);
+                    if (arr->items[arr->count]) {
+                        arr->count++;
+                    }
+                }
+                free(token);
+            }
+        }
+    }
+
+    regfree(&regex);
+
+    /* If no matches found, return array with single element (original string) */
+    if (arr->count == 0) {
+        arr->items[0] = strdup(str);
+        if (arr->items[0]) {
+            arr->count = 1;
+        }
+    }
+
     return arr;
 }
 
@@ -2306,3 +2661,210 @@ void apex_apply_metadata_to_options(apex_metadata_item *metadata, apex_options *
         item = item->next;
     }
 }
+
+#ifdef APEX_HAVE_LIBYAML
+/* Convert a YAML mapping node to a flat metadata item list */
+static apex_metadata_item *yaml_mapping_to_metadata_items(yaml_document_t *doc, yaml_node_t *mapping_node) {
+    if (!mapping_node || mapping_node->type != YAML_MAPPING_NODE) {
+        return NULL;
+    }
+
+    apex_metadata_item *items = NULL;
+    yaml_node_pair_t *pair = mapping_node->data.mapping.pairs.start;
+    while (pair < mapping_node->data.mapping.pairs.top) {
+        yaml_node_t *key_node = yaml_document_get_node(doc, pair->key);
+        yaml_node_t *value_node = yaml_document_get_node(doc, pair->value);
+
+        if (key_node && key_node->type == YAML_SCALAR_NODE && value_node) {
+            char *key = (char *)key_node->data.scalar.value;
+            size_t key_len = key_node->data.scalar.length;
+            char *key_str = malloc(key_len + 1);
+            if (key_str) {
+                memcpy(key_str, key, key_len);
+                key_str[key_len] = '\0';
+
+                if (value_node->type == YAML_SCALAR_NODE) {
+                    char *value = (char *)value_node->data.scalar.value;
+                    size_t value_len = value_node->data.scalar.length;
+                    char *value_str = malloc(value_len + 1);
+                    if (value_str) {
+                        memcpy(value_str, value, value_len);
+                        value_str[value_len] = '\0';
+                        add_metadata_item(&items, key_str, value_str);
+                        free(value_str);
+                    }
+                } else if (value_node->type == YAML_MAPPING_NODE) {
+                    /* For nested mappings like handler: { command: "..." }, flatten with dot notation */
+                    yaml_node_pair_t *nested_pair = value_node->data.mapping.pairs.start;
+                    while (nested_pair < value_node->data.mapping.pairs.top) {
+                        yaml_node_t *nested_key = yaml_document_get_node(doc, nested_pair->key);
+                        yaml_node_t *nested_value = yaml_document_get_node(doc, nested_pair->value);
+                        if (nested_key && nested_key->type == YAML_SCALAR_NODE &&
+                            nested_value && nested_value->type == YAML_SCALAR_NODE) {
+                            char *nested_key_str = (char *)nested_key->data.scalar.value;
+                            size_t nested_key_len = nested_key->data.scalar.length;
+                            char *nested_value_str = (char *)nested_value->data.scalar.value;
+                            size_t nested_value_len = nested_value->data.scalar.length;
+
+                            char *full_key = malloc(key_len + nested_key_len + 2);
+                            char *full_value = malloc(nested_value_len + 1);
+                            if (full_key && full_value) {
+                                memcpy(full_key, key_str, key_len);
+                                full_key[key_len] = '.';
+                                memcpy(full_key + key_len + 1, nested_key_str, nested_key_len);
+                                full_key[key_len + nested_key_len + 1] = '\0';
+                                memcpy(full_value, nested_value_str, nested_value_len);
+                                full_value[nested_value_len] = '\0';
+                                add_metadata_item(&items, full_key, full_value);
+                            }
+                            free(full_key);
+                            free(full_value);
+                        }
+                        nested_pair++;
+                    }
+                }
+
+                free(key_str);
+            }
+        }
+        pair++;
+    }
+    return items;
+}
+
+yaml_document_t *apex_load_yaml_document(const char *filepath) {
+    if (!filepath) return NULL;
+
+    FILE *fp = fopen(filepath, "r");
+    if (!fp) return NULL;
+
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (file_size < 0 || file_size > 1024 * 1024) {
+        fclose(fp);
+        return NULL;
+    }
+
+    char *buffer = malloc((size_t)file_size + 1);
+    if (!buffer) {
+        fclose(fp);
+        return NULL;
+    }
+
+    size_t bytes_read = fread(buffer, 1, (size_t)file_size, fp);
+    buffer[bytes_read] = '\0';
+    fclose(fp);
+
+    /* Skip YAML front matter markers if present */
+    const char *yaml_start = buffer;
+    size_t yaml_len = bytes_read;
+    if (bytes_read >= 3 && strncmp(buffer, "---", 3) == 0) {
+        const char *newline = strchr(buffer + 3, '\n');
+        if (newline) {
+            yaml_start = newline + 1;
+            yaml_len = bytes_read - (yaml_start - buffer);
+        } else {
+            yaml_start = buffer + 3;
+            yaml_len = bytes_read - 3;
+        }
+
+        /* Find closing --- */
+        const char *end_marker = strstr(yaml_start, "\n---");
+        if (!end_marker) {
+            end_marker = strstr(yaml_start, "\n...");
+        }
+        if (end_marker && end_marker > yaml_start) {
+            yaml_len = (size_t)(end_marker - yaml_start);
+        }
+    }
+
+    yaml_parser_t parser;
+    yaml_document_t *document = malloc(sizeof(yaml_document_t));
+    if (!document) {
+        free(buffer);
+        return NULL;
+    }
+
+    if (!yaml_parser_initialize(&parser)) {
+        free(buffer);
+        free(document);
+        return NULL;
+    }
+
+    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml_start, yaml_len);
+
+    if (!yaml_parser_load(&parser, document)) {
+        yaml_parser_delete(&parser);
+        free(buffer);
+        free(document);
+        return NULL;
+    }
+
+    yaml_parser_delete(&parser);
+    free(buffer);
+    return document;
+}
+
+apex_metadata_item **apex_extract_plugin_bundle(const char *filepath, size_t *count) {
+    *count = 0;
+    if (!filepath) return NULL;
+
+    yaml_document_t *doc = apex_load_yaml_document(filepath);
+    if (!doc) return NULL;
+
+    yaml_node_t *root = yaml_document_get_root_node(doc);
+    if (!root || root->type != YAML_MAPPING_NODE) {
+        yaml_document_delete(doc);
+        free(doc);
+        return NULL;
+    }
+
+    /* Find "bundle" key */
+    yaml_node_pair_t *pair = root->data.mapping.pairs.start;
+    yaml_node_t *bundle_node = NULL;
+    while (pair < root->data.mapping.pairs.top) {
+        yaml_node_t *key_node = yaml_document_get_node(doc, pair->key);
+        if (key_node && key_node->type == YAML_SCALAR_NODE) {
+            char *key = (char *)key_node->data.scalar.value;
+            if (strcmp(key, "bundle") == 0) {
+                bundle_node = yaml_document_get_node(doc, pair->value);
+                break;
+            }
+        }
+        pair++;
+    }
+
+    if (!bundle_node || bundle_node->type != YAML_SEQUENCE_NODE) {
+        yaml_document_delete(doc);
+        free(doc);
+        return NULL;
+    }
+
+    /* Extract each bundle entry */
+    size_t bundle_count = bundle_node->data.sequence.items.top - bundle_node->data.sequence.items.start;
+    apex_metadata_item **bundles = calloc(bundle_count, sizeof(apex_metadata_item *));
+    if (!bundles) {
+        yaml_document_delete(doc);
+        free(doc);
+        return NULL;
+    }
+
+    int idx = 0;
+    yaml_node_item_t *item = bundle_node->data.sequence.items.start;
+    while (item < bundle_node->data.sequence.items.top) {
+        yaml_node_t *entry = yaml_document_get_node(doc, *item);
+        if (entry && entry->type == YAML_MAPPING_NODE) {
+            bundles[idx] = yaml_mapping_to_metadata_items(doc, entry);
+            idx++;
+        }
+        item++;
+    }
+
+    *count = (size_t)idx;
+    yaml_document_delete(doc);
+    free(doc);
+    return bundles;
+}
+#endif
