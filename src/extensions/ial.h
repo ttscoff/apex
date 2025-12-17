@@ -14,6 +14,18 @@
 #include <stdbool.h>
 #include "cmark-gfm.h"
 
+/* Forward declaration - actual definition in apex/apex.h */
+#ifndef APEX_MODE_DEFINED
+#define APEX_MODE_DEFINED
+typedef enum {
+    APEX_MODE_COMMONMARK = 0,
+    APEX_MODE_GFM = 1,
+    APEX_MODE_MULTIMARKDOWN = 2,
+    APEX_MODE_KRAMDOWN = 3,
+    APEX_MODE_UNIFIED = 4
+} apex_mode_t;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -66,6 +78,40 @@ void apex_free_alds(ald_entry *alds);
  * Free attributes structure
  */
 void apex_free_attributes(apex_attributes *attrs);
+
+/**
+ * Image attribute entry (stored in document order for matching)
+ */
+typedef struct image_attr_entry {
+    char *url;                  /* Encoded URL (for reference) */
+    apex_attributes *attrs;     /* Attributes for this image */
+    int index;                  /* Position in document (0-based for inline, -1 for reference-style) */
+    struct image_attr_entry *next;
+} image_attr_entry;
+
+/**
+ * Preprocess markdown to extract image attributes and URL-encode all link URLs
+ * Handles:
+ * - Inline images: ![alt](url attributes)
+ * - Reference images: ![][ref] with [ref]: url attributes
+ * - URL encoding for all links (images and regular links)
+ *
+ * @param text Input markdown text
+ * @param img_attrs Output: list of image attributes extracted
+ * @param mode Processing mode to determine which features to enable
+ * @return Preprocessed markdown text (must be freed by caller)
+ */
+char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_attrs, apex_mode_t mode);
+
+/**
+ * Free image attribute list
+ */
+void apex_free_image_attributes(image_attr_entry *img_attrs);
+
+/**
+ * Apply image attributes to image nodes in AST
+ */
+void apex_apply_image_attributes(cmark_node *document, image_attr_entry *img_attrs);
 
 #ifdef __cplusplus
 }

@@ -2174,6 +2174,20 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
+    /* Preprocess image attributes and URL-encode all link URLs */
+    image_attr_entry *img_attrs = NULL;
+    char *image_attrs_processed = NULL;
+    if (options->mode == APEX_MODE_UNIFIED ||
+        options->mode == APEX_MODE_MULTIMARKDOWN ||
+        options->mode == APEX_MODE_KRAMDOWN) {
+        PROFILE_START(image_attrs_preprocess);
+        image_attrs_processed = apex_preprocess_image_attributes(text_ptr, &img_attrs, options->mode);
+        PROFILE_END(image_attrs_preprocess);
+        if (image_attrs_processed) {
+            text_ptr = image_attrs_processed;
+        }
+    }
+
     /* Preprocess IAL markers (insert blank lines before them so cmark parses correctly) */
     char *ial_preprocessed = NULL;
     if (options->mode == APEX_MODE_KRAMDOWN || options->mode == APEX_MODE_UNIFIED) {
@@ -2367,6 +2381,13 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
             apex_process_ial_in_tree(document, alds);
             PROFILE_END(ial);
         }
+    }
+
+    /* Apply image attributes to image nodes */
+    if (img_attrs) {
+        PROFILE_START(image_attrs);
+        apex_apply_image_attributes(document, img_attrs);
+        PROFILE_END(image_attrs);
     }
 
     /* Merge lists with mixed markers if enabled */
@@ -2711,6 +2732,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     apex_free_metadata(metadata);
     apex_free_abbreviations(abbreviations);
     apex_free_alds(alds);
+    apex_free_image_attributes(img_attrs);
     apex_free_citation_registry(&citation_registry);
 
     /* Post-render plugin phase: allow plugins to transform the final HTML

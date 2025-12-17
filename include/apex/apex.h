@@ -23,6 +23,8 @@ extern "C" {
 /**
  * Processor compatibility modes
  */
+#ifndef APEX_MODE_DEFINED
+#define APEX_MODE_DEFINED
 typedef enum {
     APEX_MODE_COMMONMARK = 0,      /* Pure CommonMark spec */
     APEX_MODE_GFM = 1,              /* GitHub Flavored Markdown */
@@ -30,6 +32,7 @@ typedef enum {
     APEX_MODE_KRAMDOWN = 3,         /* Kramdown compatibility */
     APEX_MODE_UNIFIED = 4           /* All features enabled */
 } apex_mode_t;
+#endif
 
 /**
  * Configuration options for the parser and renderer
