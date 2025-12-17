@@ -726,78 +726,58 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document) {
                 }
             }
 
-            if (para_remove && para_remove->text_fingerprint) {
-                /* Extract paragraph text to match */
-                const char *para_start = read + 3;
-                const char *para_end = strstr(para_start, "</p>");
-                if (para_end) {
-                    /* Check if paragraph starts with [ (caption format) */
-                    const char *text_start = para_start;
-                    /* Skip any leading whitespace */
-                    while (*text_start && isspace((unsigned char)*text_start)) text_start++;
+            /* Extract paragraph text to check */
+            const char *para_start = read + 3;
+            const char *para_end = strstr(para_start, "</p>");
+            if (para_end) {
+                /* Check if paragraph starts with [ (caption format) */
+                const char *text_start = para_start;
+                /* Skip any leading whitespace */
+                while (*text_start && text_start < para_end && isspace((unsigned char)*text_start)) text_start++;
 
-                    if (*text_start == '[' ||
-                        (*text_start == '&' && strncmp(text_start, "&lt;", 4) == 0)) {
-                        /* This looks like a caption paragraph - check if fingerprint matches */
-                        size_t para_len = para_end - para_start;
-                        size_t fingerprint_len = strlen(para_remove->text_fingerprint);
+                if (*text_start == '[' ||
+                    (text_start < para_end - 4 && strncmp(text_start, "&lt;", 4) == 0)) {
+                    /* This looks like a caption paragraph */
 
-                        /* Simple match: check if fingerprint appears in paragraph */
-                        /* We check the first part of the paragraph text */
-                        size_t check_len = para_len < fingerprint_len ? para_len : fingerprint_len;
-                        if (check_len > 0) {
-                            /* Compare, handling potential HTML entities */
-                            bool matches = true;
-                            const char *para_check = para_start;
-                            const char *fingerprint_check = para_remove->text_fingerprint;
-                            size_t checked = 0;
-
-                            while (checked < check_len && *para_check && *fingerprint_check) {
-                                if (*para_check == '&') {
-                                    /* Skip HTML entities - just advance para_check */
-                                    if (strncmp(para_check, "&lt;", 4) == 0) {
-                                        if (*fingerprint_check == '<') {
-                                            para_check += 4;
-                                            fingerprint_check++;
-                                            checked++;
-                                            continue;
-                                        }
-                                    } else if (strncmp(para_check, "&gt;", 4) == 0) {
-                                        if (*fingerprint_check == '>') {
-                                            para_check += 4;
-                                            fingerprint_check++;
-                                            checked++;
-                                            continue;
-                                        }
-                                    } else if (strncmp(para_check, "&amp;", 5) == 0) {
-                                        if (*fingerprint_check == '&') {
-                                            para_check += 5;
-                                            fingerprint_check++;
-                                            checked++;
-                                            continue;
-                                        }
-                                    }
-                                    matches = false;
-                                    break;
-                                } else if (*para_check == *fingerprint_check) {
-                                    para_check++;
-                                    fingerprint_check++;
-                                    checked++;
-                                } else if (isspace((unsigned char)*para_check) && isspace((unsigned char)*fingerprint_check)) {
-                                    /* Both are whitespace, skip both */
-                                    while (isspace((unsigned char)*para_check)) para_check++;
-                                    while (isspace((unsigned char)*fingerprint_check)) fingerprint_check++;
-                                    checked++;
-                                } else {
-                                    matches = false;
-                                    break;
-                                }
-                            }
-
-                            if (matches && checked >= fingerprint_len / 2) {
+                    /* First check: if we have a fingerprint match from AST */
+                    if (para_remove && para_remove->text_fingerprint) {
+                        const char *fingerprint_text = para_remove->text_fingerprint;
+                        if (fingerprint_text && strlen(fingerprint_text) > 0) {
+                            /* Simple substring match - check if fingerprint appears anywhere in paragraph content */
+                            if (strstr(para_start, fingerprint_text) != NULL) {
                                 /* Skip this entire paragraph */
                                 read = para_end + 4; /* Skip past </p> */
                                 continue; /* Skip normal copy */
+                            }
+                        }
+                    }
+
+                    /* Second check: if we're near a table/figure that has a caption, remove this paragraph */
+                    /* This is a fallback for cases where fingerprint matching fails */
+                    /* Check if any table has a caption, and if this paragraph's caption text matches */
+                    /* Extract caption text from paragraph (just the text between brackets) */
+                    const char *bracket_start = text_start;
+                    if (*bracket_start == '[') bracket_start++;
+                    else if (text_start < para_end - 4 && strncmp(bracket_start, "&lt;", 4) == 0) bracket_start += 4;
+                    const char *bracket_end = strchr(bracket_start, ']');
+                    if (!bracket_end || bracket_end >= para_end) {
+                        /* Try HTML entity version */
+                        const char *gt_entity = strstr(bracket_start, "&gt;");
+                        if (gt_entity && gt_entity < para_end) bracket_end = gt_entity;
+                    }
+                    if (bracket_end && bracket_end < para_end) {
+                        size_t caption_len = bracket_end - bracket_start;
+                        if (caption_len > 0 && caption_len < 512) {
+                            char para_caption[512];
+                            memcpy(para_caption, bracket_start, caption_len);
+                            para_caption[caption_len] = '\0';
+                            /* Compare with all table captions - if any match, remove this paragraph */
+                            for (table_caption *cap = captions; cap; cap = cap->next) {
+                                if (cap->caption && strcmp(para_caption, cap->caption) == 0) {
+                                    /* Match! Remove this paragraph */
+                                    read = para_end + 4;
+                                    continue;
+                                }
                             }
                         }
                     }

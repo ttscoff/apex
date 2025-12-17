@@ -1330,6 +1330,90 @@ static void test_relaxed_tables(void) {
 }
 
 /**
+ * Test advanced tables on comprehensive_test.md
+ * This tests rowspan and caption fixes that showed up in the larger file
+ */
+static void test_comprehensive_table_features(void) {
+    printf("\n=== Comprehensive Test File Table Features ===\n");
+
+    apex_options opts = apex_options_default();
+    opts.enable_tables = true;
+    char *html = NULL;
+
+    /* Read comprehensive_test.md file */
+    FILE *f = fopen("tests/comprehensive_test.md", "r");
+    if (!f) {
+        tests_run++;
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " comprehensive_test.md: Could not open file\n");
+        return;
+    }
+
+    /* Get file size */
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    /* Read file content */
+    char *markdown = (char *)malloc(file_size + 1);
+    if (!markdown) {
+        fclose(f);
+        tests_run++;
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " comprehensive_test.md: Memory allocation failed\n");
+        return;
+    }
+
+    size_t bytes_read = fread(markdown, 1, file_size, f);
+    markdown[bytes_read] = '\0';
+    fclose(f);
+
+    /* Convert to HTML */
+    html = apex_markdown_to_html(markdown, bytes_read, &opts);
+    free(markdown);
+
+    if (!html) {
+        tests_run++;
+        tests_failed++;
+        printf(COLOR_RED "✗" COLOR_RESET " comprehensive_test.md: Failed to convert to HTML\n");
+        return;
+    }
+
+    /* Test 1: Caption before table with IAL should render correctly */
+    /* The caption "Employee Performance Q4 2025" should appear in figcaption, not as a paragraph */
+    assert_contains(html, "<figcaption>Employee Performance Q4 2025</figcaption>",
+                    "Caption appears in figcaption tag");
+
+    /* Test 2: Caption paragraph should NOT appear as duplicate <p> tag */
+    /* We should NOT see <p>[Employee Performance Q4 2025]</p> */
+    assert_not_contains(html, "<p>[Employee Performance Q4 2025]</p>",
+                        "Caption paragraph removed (no duplicate)");
+
+    /* Test 3: Rowspan should be applied correctly - Engineering rowspan="2" */
+    assert_contains(html, "rowspan=\"2\"", "Rowspan attribute present");
+    assert_contains(html, "<td rowspan=\"2\">Engineering</td>", "Engineering has rowspan=2");
+
+    /* Test 4: Rowspan should be applied correctly - Sales rowspan="2" */
+    assert_contains(html, "<td rowspan=\"2\">Sales</td>", "Sales has rowspan=2");
+
+    /* Test 5: Table should be wrapped in figure tag */
+    assert_contains(html, "<figure class=\"table-figure\">", "Table wrapped in figure with class");
+
+    /* Test 6: Colspan should work for empty cells (Absent cell) */
+    assert_contains(html, "colspan=\"2\"", "Colspan attribute present");
+
+    /* Test 7: Table structure should be correct - key rows present */
+    assert_contains(html, "<td>Alice</td>", "Alice row present");
+    assert_contains(html, "<td>Bob</td>", "Bob row present");
+    assert_contains(html, "<td>Charlie</td>", "Charlie row present");
+    assert_contains(html, "<td>Diana</td>", "Diana row present");
+    /* Eve is in the last row with rowspan */
+    assert_contains(html, "Eve", "Eve row present");
+
+    apex_free_string(html);
+}
+
+/**
  * Test callouts (Bear/Obsidian/Xcode)
  */
 static void test_callouts(void) {
@@ -3457,6 +3541,7 @@ int main(int argc, char *argv[]) {
     test_definition_lists();
     test_advanced_tables();
     test_relaxed_tables();
+    test_comprehensive_table_features();
 
     /* Medium-priority feature tests */
     test_callouts();

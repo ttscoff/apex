@@ -228,7 +228,6 @@ static void process_table_spans(cmark_node *table) {
             }
 
             /* Check if this row only contains '—' cells (separator row or empty row) */
-            bool skip_row = false;
             cmark_node *check_cell = cmark_node_first_child(row);
             bool all_dash = true;
             bool has_cells = false;
