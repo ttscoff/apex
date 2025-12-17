@@ -110,14 +110,19 @@ static bool is_tfoot_row(cmark_node *row) {
 
 /**
  * Check if a row contains only a caption marker (last row with [Caption])
+ * Note: This detection works when captions are parsed as table rows, but currently
+ * captions immediately following tables without a blank line are not reliably detected
+ * because cmark-gfm parses them as table rows which interferes with detection.
  */
 static bool is_caption_row(cmark_node *row) {
     if (!row || cmark_node_get_type(row) != CMARK_NODE_TABLE_ROW) return false;
 
-    /* Check if this row has only one cell with [Caption] format */
+    /* Check if this row has a cell with [Caption] format */
+    /* It might be a single cell, or a cell that spans columns */
     cmark_node *cell = cmark_node_first_child(row);
     int cell_count = 0;
     bool has_caption = false;
+    int caption_cell_count = 0;
 
     while (cell) {
         if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
@@ -132,6 +137,7 @@ static bool is_caption_row(cmark_node *row) {
                         while (*after && isspace((unsigned char)*after)) after++;
                         if (*after == '\0') {
                             has_caption = true;
+                            caption_cell_count++;
                         }
                     }
                 }
@@ -140,7 +146,10 @@ static bool is_caption_row(cmark_node *row) {
         cell = cmark_node_next(cell);
     }
 
-    return cell_count == 1 && has_caption;
+    /* Caption row: has caption text, and either:
+     * - Single cell with caption, OR
+     * - All cells contain caption text (shouldn't happen, but be safe) */
+    return has_caption && (cell_count == 1 || caption_cell_count == cell_count);
 }
 
 /**
@@ -504,11 +513,8 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                     }
                 }
 
-                /* Process spans - this also detects caption rows and tfoot rows */
-                process_table_spans(cur);
-
-                /* After processing spans, check if any row is a caption row */
-                /* Check all rows in the table (especially the last one) */
+                /* Check for caption rows BEFORE processing spans */
+                /* Caption rows should be detected and removed before colspan processing */
                 cmark_node *row_check = cmark_node_first_child(cur);
                 cmark_node *caption_row = NULL;
                 while (row_check) {
@@ -523,29 +529,39 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                 if (caption_row) {
                     cmark_node *cell = cmark_node_first_child(caption_row);
                     if (cell) {
-                        cmark_node *text_node = cmark_node_first_child(cell);
-                        if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
-                            const char *text = cmark_node_get_literal(text_node);
-                            if (text && text[0] == '[') {
-                                const char *end = strchr(text + 1, ']');
-                                if (end) {
-                                    size_t caption_len = end - text - 1;
-                                    char *caption = malloc(caption_len + 1);
-                                    if (caption) {
-                                        memcpy(caption, text + 1, caption_len);
-                                        caption[caption_len] = '\0';
-                                        add_table_caption(cur, caption);
-                                        free(caption);
-                                        /* Mark the entire row for removal */
-                                        char *existing = (char *)cmark_node_get_user_data(caption_row);
-                                        if (existing) free(existing);
-                                        cmark_node_set_user_data(caption_row, strdup(" data-remove=\"true\""));
+                        /* Find the cell with caption text (might be first cell, might span) */
+                        while (cell) {
+                            if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
+                                cmark_node *text_node = cmark_node_first_child(cell);
+                                if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
+                                    const char *text = cmark_node_get_literal(text_node);
+                                    if (text && text[0] == '[') {
+                                        const char *end = strchr(text + 1, ']');
+                                        if (end) {
+                                            size_t caption_len = end - text - 1;
+                                            char *caption = malloc(caption_len + 1);
+                                            if (caption) {
+                                                memcpy(caption, text + 1, caption_len);
+                                                caption[caption_len] = '\0';
+                                                add_table_caption(cur, caption);
+                                                free(caption);
+                                                /* Mark the entire row for removal */
+                                                char *existing = (char *)cmark_node_get_user_data(caption_row);
+                                                if (existing) free(existing);
+                                                cmark_node_set_user_data(caption_row, strdup(" data-remove=\"true\""));
+                                                break; /* Found caption, done */
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            cell = cmark_node_next(cell);
                         }
                     }
                 }
+
+                /* Process spans - this also detects tfoot rows */
+                process_table_spans(cur);
             }
         }
     }

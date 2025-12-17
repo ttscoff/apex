@@ -625,6 +625,15 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document) {
             row_idx++;
             col_idx = 0;
 
+            /* Note: Captions immediately following tables (with no blank line) are not supported.
+             * When a caption like [Caption] appears on the line immediately after a table, cmark-gfm
+             * parses it as a table row rather than a paragraph, making it difficult to detect and extract
+             * reliably. Captions work correctly when:
+             * - They appear before the table (with or without blank line)
+             * - They appear after the table with a blank line between (parsed as a paragraph)
+             * To use a caption after a table, include a blank line between the table and caption.
+             */
+
             /* Check if this row should be in tfoot */
             current_row_is_tfoot = false;
             for (tfoot_row *t = tfoot_rows; t; t = t->next) {
