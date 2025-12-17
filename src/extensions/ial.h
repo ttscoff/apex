@@ -86,6 +86,7 @@ typedef struct image_attr_entry {
     char *url;                  /* Encoded URL (for reference) */
     apex_attributes *attrs;     /* Attributes for this image */
     int index;                  /* Position in document (0-based for inline, -1 for reference-style) */
+    char *ref_name;             /* Reference name (for reference-style definitions) */
     struct image_attr_entry *next;
 } image_attr_entry;
 

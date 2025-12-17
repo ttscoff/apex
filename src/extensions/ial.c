@@ -1195,6 +1195,25 @@ static image_attr_entry *create_image_attr_entry(image_attr_entry **list, const 
         entry->url = strdup(url);
         entry->attrs = create_attributes();
         entry->index = index;
+        entry->ref_name = NULL;
+        entry->next = *list;
+        *list = entry;
+    }
+    return entry;
+}
+
+/**
+ * Create image attribute entry with reference name (for reference-style definitions)
+ */
+static image_attr_entry *create_image_attr_entry_with_ref(image_attr_entry **list, const char *url, const char *ref_name) {
+    if (!list || !url) return NULL;
+
+    image_attr_entry *entry = calloc(1, sizeof(image_attr_entry));
+    if (entry) {
+        entry->url = strdup(url);
+        entry->attrs = create_attributes();
+        entry->index = -1;
+        entry->ref_name = ref_name ? strdup(ref_name) : NULL;
         entry->next = *list;
         *list = entry;
     }
@@ -1208,10 +1227,83 @@ void apex_free_image_attributes(image_attr_entry *img_attrs) {
     while (img_attrs) {
         image_attr_entry *next = img_attrs->next;
         free(img_attrs->url);
+        free(img_attrs->ref_name);
         apex_free_attributes(img_attrs->attrs);
         free(img_attrs);
         img_attrs = next;
     }
+}
+
+/**
+ * Convert attributes back to markdown attribute string (for expanding reference-style images)
+ */
+static char *attributes_to_markdown(apex_attributes *attrs) {
+    if (!attrs || (!attrs->id && attrs->class_count == 0 && attrs->attr_count == 0)) {
+        return strdup("");
+    }
+
+    char buffer[4096];
+    char *p = buffer;
+    size_t remaining = sizeof(buffer);
+
+    #define APPEND_MD(str) do { \
+        size_t len = strlen(str); \
+        if (len < remaining) { \
+            memcpy(p, str, len); \
+            p += len; \
+            remaining -= len; \
+        } \
+    } while(0)
+
+    bool first = true;
+
+    /* Add ID */
+    if (attrs->id) {
+        char id_str[512];
+        snprintf(id_str, sizeof(id_str), "%s#%s", first ? "" : " ", attrs->id);
+        first = false;
+        APPEND_MD(id_str);
+    }
+
+    /* Add classes */
+    for (int i = 0; i < attrs->class_count; i++) {
+        char class_str[512];
+        snprintf(class_str, sizeof(class_str), "%s.%s", first ? "" : " ", attrs->classes[i]);
+        first = false;
+        APPEND_MD(class_str);
+    }
+
+    /* Add other attributes - format as key=value or key="value" */
+    for (int i = 0; i < attrs->attr_count; i++) {
+        char attr_str[1024];
+        const char *val = attrs->values[i];
+        /* Quote value if it contains spaces, semicolons, or special characters */
+        bool need_quotes = (strchr(val, ' ') != NULL || strchr(val, ';') != NULL || strchr(val, '"') != NULL);
+        if (need_quotes) {
+            snprintf(attr_str, sizeof(attr_str), "%s%s=\"%s\"", first ? "" : " ", attrs->keys[i], val);
+        } else {
+            snprintf(attr_str, sizeof(attr_str), "%s%s=%s", first ? "" : " ", attrs->keys[i], val);
+        }
+        first = false;
+        APPEND_MD(attr_str);
+    }
+
+    #undef APPEND_MD
+
+    *p = '\0';
+    return strdup(buffer);
+}
+
+/**
+ * Find image attribute entry by reference name
+ */
+static image_attr_entry *find_image_attr_by_ref(image_attr_entry *list, const char *ref_name) {
+    for (image_attr_entry *entry = list; entry; entry = entry->next) {
+        if (entry->ref_name && ref_name && strcmp(entry->ref_name, ref_name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
 }
 
 /**
@@ -1276,12 +1368,12 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
         /* Look for inline images: ![alt](url attributes) */
         if (*read == '!' && read[1] == '[') {
             const char *img_start = read;
-            read += 2; /* Skip ![ */
+            const char *check_pos = read + 2; /* After ![ */
 
             /* Find closing ] for alt text */
-            const char *alt_end = strchr(read, ']');
+            const char *alt_end = strchr(check_pos, ']');
             if (alt_end && alt_end[1] == '(') {
-                /* Found ![alt]\( */
+                /* This is an inline image ![alt](url) - process it */
                 const char *url_start = alt_end + 2; /* After ]( */
                 const char *p = url_start;
                 const char *url_end = NULL;
@@ -1293,8 +1385,8 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                 if (*p == ')') {
                     paren_end = p;
                 } else {
-                    /* No closing paren found - malformed, skip */
-                    read = url_start;
+                    /* Malformed - skip just the ! and continue */
+                    read = img_start + 1;
                     continue;
                 }
 
@@ -1414,12 +1506,30 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                         free(url);
                         continue;
                     }
+                } else {
+                    /* Malformed inline image - skip just the ! and continue */
+                    read = img_start + 1;
+                    continue;
                 }
+            } else {
+                /* Not an inline image - might be reference-style ![ref][id] */
+                /* Pass through unchanged by copying the ![ */
+                if (remaining > 0) {
+                    *write++ = *read++;
+                    remaining--;
+                    if (remaining > 0 && *read == '[') {
+                        *write++ = *read++;
+                        remaining--;
+                    }
+                } else {
+                    read++;
+                }
+                continue;
             }
         }
 
         /* Look for reference-style link definitions: [ref]: url attributes */
-        /* Only process if there are attributes (indicating it's for an image) */
+        /* Process to URL-encode URLs and extract image attributes if present */
         if (*read == '[') {
             const char *ref_start = read;
             const char *ref_end = strchr(ref_start, ']');
@@ -1433,25 +1543,32 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                 const char *url_end = NULL;
                 const char *attr_start = NULL;
 
-                /* Find URL end (space before attributes or newline/end) */
-                while (*p && *p != '\n' && *p != '\r') {
-                    if ((*p == ' ' || *p == '\t') && !attr_start) {
-                        attr_start = p;
-                        const char *check = p;
-                        while (*check && (*check == ' ' || *check == '\t')) check++;
-                        if (*check && *check != '\n' && *check != '\r') {
-                            url_end = p;
-                            p = check;
-                            break;
-                        } else {
-                            attr_start = NULL;
+                /* Find the end of the line first */
+                const char *line_end = p;
+                while (*line_end && *line_end != '\n' && *line_end != '\r') line_end++;
+
+                /* Look for attributes by scanning backwards from end or looking for key= pattern */
+                /* We need to distinguish between spaces in URL vs spaces before attributes */
+                if (do_image_attrs) {
+                    /* Scan forward to find where attributes start (look for key= pattern) */
+                    p = url_start;
+                    while (p < line_end) {
+                        if (*p == ' ' || *p == '\t') {
+                            const char *after_space = p;
+                            while (after_space < line_end && (*after_space == ' ' || *after_space == '\t')) after_space++;
+                            if (after_space < line_end && looks_like_attribute_start(after_space, line_end)) {
+                                /* This looks like attributes */
+                                attr_start = after_space;
+                                url_end = p;
+                                break;
+                            }
                         }
+                        p++;
                     }
-                    p++;
                 }
 
                 if (!url_end) {
-                    url_end = p; /* URL ends at newline */
+                    url_end = line_end; /* URL ends at newline (no attributes found) */
                 }
 
                 if (url_end > url_start) {
@@ -1471,13 +1588,21 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                             attrs = parse_image_attributes(attr_start, attr_len);
                         }
 
-                        /* URL encode the URL (if enabled) */
+                        /* Extract reference name */
+                        size_t ref_name_len = ref_end - ref_start - 1; /* Exclude [ and ] */
+                        char *ref_name = malloc(ref_name_len + 1);
+                        if (ref_name) {
+                            memcpy(ref_name, ref_start + 1, ref_name_len);
+                            ref_name[ref_name_len] = '\0';
+                        }
+
+                        /* URL encode the URL (if enabled) - always encode for reference definitions */
                         char *encoded_url = do_url_encoding ? url_encode(url) : strdup(url);
                         if (encoded_url) {
-                            /* If has attributes, store them (assume it's for an image) */
-                            /* Reference definitions use index -1 to indicate URL-based matching */
-                            if (attrs && do_image_attrs) {
-                                image_attr_entry *entry = create_image_attr_entry(&local_img_attrs, encoded_url, -1);
+                            /* If has attributes, store them with reference name */
+                            /* Note: ref_name will be duplicated in create_image_attr_entry_with_ref */
+                            if (attrs && do_image_attrs && ref_name) {
+                                image_attr_entry *entry = create_image_attr_entry_with_ref(&local_img_attrs, encoded_url, ref_name);
                                 if (entry) {
                                     /* Copy attributes (don't merge) */
                                     for (int i = 0; i < attrs->attr_count; i++) {
@@ -1491,6 +1616,8 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                                     }
                                 }
                             }
+                            /* Free ref_name after storing (entry duplicates it) */
+                            free(ref_name);
 
                             /* Write the reference up to URL */
                             size_t prefix_len = url_start - ref_start;
@@ -1526,22 +1653,9 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                                 remaining -= encoded_len;
                             }
 
-                            /* Write attributes if present */
-                            if (attr_start && attrs && attr_start < p) {
-                                const char *attr_p = attr_start;
-                                const char *attr_end = p;
-                                while (*attr_end && *attr_end != '\n' && *attr_end != '\r') attr_end++;
-                                while (attr_p < attr_end) {
-                                    if (remaining > 0) {
-                                        *write++ = *attr_p++;
-                                        remaining--;
-                                    } else {
-                                        attr_p++;
-                                    }
-                                }
-                            }
-
-                            /* Find end of line */
+                            /* For reference definitions with attributes, DON'T write attributes back */
+                            /* We'll expand reference-style images instead */
+                            /* Skip to end of line */
                             while (*p && *p != '\n' && *p != '\r') p++;
 
                             /* Copy newline */
@@ -1584,20 +1698,16 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
                 const char *p = url_start;
                 const char *url_end = NULL;
 
-                /* Find URL end (space or ) or newline) */
+                /* Find URL end - for regular links, URL goes to closing ) */
+                /* Regular links don't have attributes, so URL includes spaces until ) */
                 while (*p && *p != ')' && *p != '\n') {
-                    if (*p == ' ' || *p == '\t') {
-                        /* Regular links don't have attributes, so space means end of URL */
-                        url_end = p;
-                        break;
-                    }
                     p++;
                 }
 
-                if (!url_end && *p == ')') {
+                if (*p == ')') {
                     url_end = p;
-                } else if (!url_end) {
-                    url_end = p;
+                } else {
+                    url_end = p; /* End at newline or end of string */
                 }
 
                 if (url_end > url_start) {
@@ -1691,6 +1801,278 @@ char *apex_preprocess_image_attributes(const char *text, image_attr_entry **img_
     }
 
     *write = '\0';
+
+    /* Second pass: expand reference-style images that have attributes */
+    /* We need to expand ![ref][img1] to ![ref](url attributes) for definitions with attributes */
+    /* After expansion, we need to reprocess the expanded inline images */
+    if (do_image_attrs && local_img_attrs) {
+        char *expanded_output = malloc(strlen(output) * 3 + 1);
+        if (expanded_output) {
+            const char *read2 = output;
+            char *write2 = expanded_output;
+            size_t remaining2 = strlen(output) * 3;
+            bool made_expansions = false;
+
+            while (*read2) {
+                /* Look for reference-style images: ![alt][ref] */
+                if (*read2 == '!' && read2[1] == '[') {
+                    const char *img_start = read2;
+                    read2 += 2; /* Skip ![ */
+
+                    /* Find closing ] for alt text */
+                    const char *alt_end = strchr(read2, ']');
+                    if (alt_end && alt_end[1] == '[') {
+                        /* Found ![alt][ */
+                        const char *ref_start = alt_end + 2; /* After ][ */
+                        const char *ref_end = strchr(ref_start, ']');
+                        if (ref_end) {
+                            /* Extract reference name */
+                            size_t ref_name_len = ref_end - ref_start;
+                            char *ref_name = malloc(ref_name_len + 1);
+                            if (ref_name) {
+                                memcpy(ref_name, ref_start, ref_name_len);
+                                ref_name[ref_name_len] = '\0';
+
+                                /* Look up if this reference has attributes */
+                                image_attr_entry *def_entry = find_image_attr_by_ref(local_img_attrs, ref_name);
+                                if (def_entry && def_entry->attrs && def_entry->url) {
+                                    /* Expand to inline image: ![alt](url attributes) */
+                                    /* Extract alt text */
+                                    size_t alt_len = alt_end - read2;
+
+                                    /* Convert attributes to markdown format */
+                                    char *attr_str = attributes_to_markdown(def_entry->attrs);
+
+                                    /* Build expanded image: ![alt](url attributes) */
+                                    /* Need space for: ![ + alt + ]( + url + space + attr_str + ) */
+                                    size_t url_len = strlen(def_entry->url);
+                                    size_t attr_len = attr_str ? strlen(attr_str) : 0;
+                                    size_t needed = 4 + alt_len + url_len + (attr_len > 0 ? attr_len + 1 : 0) + 1;
+
+                                    /* Check if we need to expand buffer */
+                                    if (remaining2 < needed) {
+                                        size_t written = write2 - expanded_output;
+                                        size_t new_cap = (written + needed + 1) * 2;
+                                        char *new_expanded = realloc(expanded_output, new_cap);
+                                        if (new_expanded) {
+                                            expanded_output = new_expanded;
+                                            write2 = expanded_output + written;
+                                            remaining2 = new_cap - written;
+                                        }
+                                    }
+
+                                    if (remaining2 >= needed) {
+                                        made_expansions = true;
+
+                                        /* Write ![alt](url */
+                                        *write2++ = '!';
+                                        *write2++ = '[';
+                                        remaining2 -= 2;
+                                        memcpy(write2, read2, alt_len);
+                                        write2 += alt_len;
+                                        remaining2 -= alt_len;
+                                        *write2++ = ']';
+                                        *write2++ = '(';
+                                        remaining2 -= 2;
+
+                                        /* Write URL */
+                                        memcpy(write2, def_entry->url, url_len);
+                                        write2 += url_len;
+                                        remaining2 -= url_len;
+
+                                        /* Write attributes if present */
+                                        if (attr_str && *attr_str) {
+                                            *write2++ = ' ';
+                                            remaining2--;
+                                            memcpy(write2, attr_str, attr_len);
+                                            write2 += attr_len;
+                                            remaining2 -= attr_len;
+                                        }
+
+                                        *write2++ = ')';
+                                        remaining2--;
+
+                                        read2 = ref_end + 1;
+                                        free(ref_name);
+                                        free(attr_str);
+                                        continue;
+                                    }
+                                    free(attr_str);
+                                }
+                                free(ref_name);
+                            }
+                        }
+                    }
+                    /* Not a reference-style image with attributes, or expansion failed - copy as-is */
+                    read2 = img_start;
+                }
+
+                /* Copy character */
+                if (remaining2 > 0) {
+                    *write2++ = *read2++;
+                    remaining2--;
+                } else {
+                    read2++;
+                }
+            }
+
+            *write2 = '\0';
+            free(output);
+            output = expanded_output;
+
+            /* If we made expansions, we need to extract attributes from the expanded inline images */
+            /* Process the expanded output to extract attributes from newly created inline images */
+            if (made_expansions) {
+                /* Create a temporary buffer to process expanded inline images */
+                const char *proc_read = output;
+                char *proc_output = malloc(strlen(output) * 2 + 1);
+                if (proc_output) {
+                    char *proc_write = proc_output;
+                    size_t proc_remaining = strlen(output) * 2;
+
+                    while (*proc_read) {
+                        /* Look for inline images that were just expanded */
+                        if (*proc_read == '!' && proc_read[1] == '[') {
+                            const char *img_start = proc_read;
+                            const char *check_pos = proc_read + 2; /* After ![ */
+
+                            /* Find closing ] for alt text */
+                            const char *alt_end = strchr(check_pos, ']');
+                            if (alt_end && alt_end[1] == '(') {
+                                const char *url_start = alt_end + 2;
+                                const char *p = url_start;
+                                const char *url_end = NULL;
+                                const char *attr_start = NULL;
+                                const char *paren_end = NULL;
+
+                                /* Find closing paren */
+                                while (*p && *p != ')' && *p != '\n') p++;
+                                if (*p == ')') {
+                                    paren_end = p;
+                                    p = url_start;
+
+                                    /* Look for attributes */
+                                    while (p < paren_end) {
+                                        if (*p == ' ' || *p == '\t') {
+                                            const char *after_space = p;
+                                            while (after_space < paren_end && (*after_space == ' ' || *after_space == '\t')) after_space++;
+                                            if (after_space < paren_end && looks_like_attribute_start(after_space, paren_end)) {
+                                                attr_start = after_space;
+                                                url_end = p;
+                                                break;
+                                            }
+                                        }
+                                        p++;
+                                    }
+
+                                    if (!url_end) url_end = paren_end;
+
+                                    /* Only process images with attributes (these are the expanded reference-style images) */
+                                    /* Images without attributes were already processed in the first pass */
+                                    if (url_end > url_start && attr_start) {
+                                        /* Extract URL and attributes */
+                                        size_t url_len = url_end - url_start;
+                                        char *url = malloc(url_len + 1);
+                                        char *encoded_url = NULL;
+                                        apex_attributes *attrs = NULL;
+
+                                        if (url) {
+                                            memcpy(url, url_start, url_len);
+                                            url[url_len] = '\0';
+
+                                            size_t attr_len = paren_end - attr_start;
+                                            attrs = parse_image_attributes(attr_start, attr_len);
+
+                                            /* URL is already encoded from expansion, so use as-is */
+                                            encoded_url = strdup(url);
+                                            if (encoded_url && attrs) {
+                                                /* Count existing entries to get index */
+                                                int img_index = 0;
+                                                for (image_attr_entry *e = local_img_attrs; e; e = e->next) {
+                                                    if (e->index >= 0) img_index++;
+                                                }
+
+                                                image_attr_entry *entry = create_image_attr_entry(&local_img_attrs, encoded_url, img_index);
+                                                if (entry) {
+                                                    /* Copy attributes */
+                                                    for (int i = 0; i < attrs->attr_count; i++) {
+                                                        add_attribute(entry->attrs, attrs->keys[i], attrs->values[i]);
+                                                    }
+                                                    if (attrs->id) {
+                                                        entry->attrs->id = strdup(attrs->id);
+                                                    }
+                                                    for (int i = 0; i < attrs->class_count; i++) {
+                                                        add_class(entry->attrs, attrs->classes[i]);
+                                                    }
+                                                }
+                                            }
+
+                                            /* Write the processed image: ![alt](encoded_url) - attributes removed */
+                                            size_t prefix_len = url_start - img_start; /* Includes ![alt]( */
+                                            if (prefix_len < proc_remaining) {
+                                                memcpy(proc_write, img_start, prefix_len);
+                                                proc_write += prefix_len;
+                                                proc_remaining -= prefix_len;
+                                            } else {
+                                                /* Buffer too small - skip this image */
+                                                if (attrs) apex_free_attributes(attrs);
+                                                free(encoded_url);
+                                                free(url);
+                                                proc_read = paren_end + 1;
+                                                continue;
+                                            }
+
+                                            /* Write encoded URL (already encoded, so write as-is) */
+                                            size_t encoded_len = strlen(encoded_url ? encoded_url : url);
+                                            if (encoded_len < proc_remaining) {
+                                                memcpy(proc_write, encoded_url ? encoded_url : url, encoded_len);
+                                                proc_write += encoded_len;
+                                                proc_remaining -= encoded_len;
+                                            } else {
+                                                if (attrs) apex_free_attributes(attrs);
+                                                free(encoded_url);
+                                                free(url);
+                                                proc_read = paren_end + 1;
+                                                continue;
+                                            }
+
+                                            /* Write closing paren */
+                                            if (proc_remaining > 0) {
+                                                *proc_write++ = ')';
+                                                proc_remaining--;
+                                            }
+
+                                            /* Cleanup */
+                                            if (attrs) apex_free_attributes(attrs);
+                                            free(encoded_url);
+                                            free(url);
+
+                                            /* Advance past the processed image */
+                                            proc_read = paren_end + 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                            /* Not a valid inline image, or no attributes (already processed in first pass) - fall through to copy */
+                        }
+
+                        /* Copy character - this handles regular text and inline images without attributes */
+                        if (proc_remaining > 0) {
+                            *proc_write++ = *proc_read++;
+                            proc_remaining--;
+                        } else {
+                            proc_read++;
+                        }
+                    }
+
+                    *proc_write = '\0';
+                    free(output);
+                    output = proc_output;
+                }
+            }
+        }
+    }
 
     /* Return the image attributes list */
     *img_attrs = local_img_attrs;

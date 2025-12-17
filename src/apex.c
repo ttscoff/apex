@@ -2398,14 +2398,13 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     /* Note: Critic Markup is now handled via preprocessing (before parsing) */
 
     /* Render to HTML
-     * Unified mode: use standard renderer to preserve autolinks/raw HTML
-     * Kramdown or ALDs: use custom renderer for attributes/IAL
+     * Use custom renderer when we have attributes (IAL, ALDs, or image attributes)
+     * Otherwise use standard renderer
      */
     PROFILE_START(rendering);
     char *html;
-    if (options->mode == APEX_MODE_UNIFIED) {
-        html = cmark_render_html(document, cmark_opts, NULL);
-    } else if (alds || options->mode == APEX_MODE_KRAMDOWN) {
+    if (img_attrs || alds || options->mode == APEX_MODE_KRAMDOWN || options->mode == APEX_MODE_UNIFIED) {
+        /* Use custom renderer to inject attributes */
         html = apex_render_html_with_attributes(document, cmark_opts);
     } else {
         html = cmark_render_html(document, cmark_opts, NULL);

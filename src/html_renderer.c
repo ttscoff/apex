@@ -252,6 +252,10 @@ char *apex_render_html_with_attributes(cmark_node *document, int options) {
                 tag_name_end++;
             }
 
+            /* Find the end of the tag (> or />) */
+            const char *tag_end = tag_name_end;
+            while (*tag_end && *tag_end != '>') tag_end++;
+
             /* Check if this is a block tag or table cell we care about */
             int tag_len = tag_name_end - tag_start;
 
@@ -423,9 +427,30 @@ char *apex_render_html_with_attributes(cmark_node *document, int options) {
                         strstr(matching->attrs, "rowspan=")) {
                         /* These are handled elsewhere, don't inject here */
                     } else {
-                        /* Find where to inject (before > or after tag name) */
-                        const char *inject_point = tag_name_end;
-                        while (*inject_point && isspace((unsigned char)*inject_point)) inject_point++;
+                        /* Find where to inject attributes */
+                        const char *inject_point = NULL;
+
+                        if (elem_type == CMARK_NODE_IMAGE || elem_type == CMARK_NODE_LINK) {
+                            /* For inline elements (img, a), inject before the closing > or /> */
+                            /* Find the closing > for this tag */
+                            const char *close_pos = tag_end;
+                            if (*close_pos == '>') {
+                                /* Check if it's a self-closing tag /> */
+                                if (close_pos > tag_name_end && close_pos[-1] == '/') {
+                                    inject_point = close_pos - 1; /* Before /> */
+                                } else {
+                                    inject_point = close_pos; /* Before > */
+                                }
+                            } else {
+                                /* Fallback: after tag name if we can't find > */
+                                inject_point = tag_name_end;
+                                while (*inject_point && isspace((unsigned char)*inject_point) && *inject_point != '>') inject_point++;
+                            }
+                        } else {
+                            /* For block elements, inject after tag name */
+                            inject_point = tag_name_end;
+                            while (*inject_point && isspace((unsigned char)*inject_point)) inject_point++;
+                        }
 
                         /* Copy up to injection point */
                         size_t prefix_len = inject_point - read;
@@ -435,8 +460,8 @@ char *apex_render_html_with_attributes(cmark_node *document, int options) {
                             remaining -= prefix_len;
                         }
 
-                        /* Add space before attributes if needed */
-                        if (inject_point == tag_name_end && *inject_point != ' ') {
+                        /* Add space before attributes if needed (unless we're right before >) */
+                        if (*inject_point != '>' && *inject_point != '/') {
                             if (remaining > 0) {
                                 *write++ = ' ';
                                 remaining--;
