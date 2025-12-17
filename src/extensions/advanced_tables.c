@@ -74,6 +74,76 @@ static bool is_rowspan_cell(cmark_node *cell) {
 }
 
 /**
+ * Check if a row should be in tfoot (contains === markers)
+ */
+static bool is_tfoot_row(cmark_node *row) {
+    if (!row || cmark_node_get_type(row) != CMARK_NODE_TABLE_ROW) return false;
+
+    cmark_node *cell = cmark_node_first_child(row);
+    bool has_equals = false;
+
+    while (cell) {
+        if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
+            cmark_node *text_node = cmark_node_first_child(cell);
+            if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
+                const char *text = cmark_node_get_literal(text_node);
+                if (text) {
+                    /* Trim whitespace */
+                    while (*text && isspace((unsigned char)*text)) text++;
+                    /* Check if it's only === (three or more equals) */
+                    if (*text == '=' && text[1] == '=' && text[2] == '=') {
+                        const char *after = text + 3;
+                        while (*after == '=') after++; /* Allow more equals */
+                        while (*after && isspace((unsigned char)*after)) after++;
+                        if (*after == '\0') {
+                            has_equals = true;
+                        }
+                    }
+                }
+            }
+        }
+        cell = cmark_node_next(cell);
+    }
+
+    return has_equals;
+}
+
+/**
+ * Check if a row contains only a caption marker (last row with [Caption])
+ */
+static bool is_caption_row(cmark_node *row) {
+    if (!row || cmark_node_get_type(row) != CMARK_NODE_TABLE_ROW) return false;
+
+    /* Check if this row has only one cell with [Caption] format */
+    cmark_node *cell = cmark_node_first_child(row);
+    int cell_count = 0;
+    bool has_caption = false;
+
+    while (cell) {
+        if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
+            cell_count++;
+            cmark_node *text_node = cmark_node_first_child(cell);
+            if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
+                const char *text = cmark_node_get_literal(text_node);
+                if (text && text[0] == '[') {
+                    const char *end = strchr(text + 1, ']');
+                    if (end) {
+                        const char *after = end + 1;
+                        while (*after && isspace((unsigned char)*after)) after++;
+                        if (*after == '\0') {
+                            has_caption = true;
+                        }
+                    }
+                }
+            }
+        }
+        cell = cmark_node_next(cell);
+    }
+
+    return cell_count == 1 && has_caption;
+}
+
+/**
  * Add colspan/rowspan attributes to table cells
  * This modifies the AST by setting user_data with HTML attributes
  */
@@ -88,6 +158,7 @@ static void process_table_spans(cmark_node *table) {
 
     cmark_node *prev_row = NULL;
     bool is_first_row = true; /* Track header row */
+    bool in_tfoot_section = false; /* Track if we've entered tfoot section */
 
     while (row) {
         if (cmark_node_get_type(row) == CMARK_NODE_TABLE_ROW) {
@@ -98,6 +169,55 @@ static void process_table_spans(cmark_node *table) {
                 row = cmark_node_next(row);
                 continue;
             }
+
+            /* Check if this row is a tfoot row (contains ===) */
+            /* Once we encounter a tfoot row, all subsequent rows are in tfoot */
+            if (is_tfoot_row(row) || in_tfoot_section) {
+                if (is_tfoot_row(row)) {
+                    in_tfoot_section = true;
+                }
+                /* Mark this row as tfoot (either because it contains === or it's after a === row) */
+                char *existing = (char *)cmark_node_get_user_data(row);
+                if (existing) free(existing);
+                cmark_node_set_user_data(row, strdup(" data-tfoot=\"true\""));
+
+                /* Mark === cells for removal (they'll be rendered as empty cells) */
+                /* Only do this if this row actually contains === */
+                if (is_tfoot_row(row)) {
+                    cmark_node *cell = cmark_node_first_child(row);
+                while (cell) {
+                    if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
+                        cmark_node *text_node = cmark_node_first_child(cell);
+                        if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
+                            const char *text = cmark_node_get_literal(text_node);
+                            if (text) {
+                                /* Trim whitespace */
+                                while (*text && isspace((unsigned char)*text)) text++;
+                                /* Check if it's === */
+                                if (text[0] == '=' && text[1] == '=' && text[2] == '=') {
+                                    const char *after = text + 3;
+                                    while (*after == '=') after++; /* Allow more equals */
+                                    while (*after && isspace((unsigned char)*after)) after++;
+                                    if (*after == '\0') {
+                                        /* This is a === cell - mark for removal */
+                                        char *cell_attrs = (char *)cmark_node_get_user_data(cell);
+                                        if (cell_attrs) free(cell_attrs);
+                                        cmark_node_set_user_data(cell, strdup(" data-remove=\"true\""));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    cell = cmark_node_next(cell);
+                }
+                }
+                /* Don't skip the row - continue processing but don't update prev_row for rowspan */
+                /* (tfoot rows shouldn't participate in rowspan calculations) */
+                prev_row = row;
+                row = cmark_node_next(row);
+                continue;
+            }
+
             /* Check if this row only contains '—' cells (separator row or empty row) */
             bool skip_row = false;
             cmark_node *check_cell = cmark_node_first_child(row);
@@ -321,11 +441,19 @@ static void add_table_caption(cmark_node *table, const char *caption) {
         /* Append to existing user_data if present */
         char *existing = (char *)cmark_node_get_user_data(table);
         if (existing) {
+            /* Check if caption is already in existing data */
+            if (strstr(existing, "data-caption=")) {
+                free(attrs);
+                return; /* Caption already present */
+            }
             char *combined = malloc(strlen(existing) + strlen(attrs) + 1);
             if (combined) {
                 strcpy(combined, existing);
                 strcat(combined, attrs);
+                free(existing); /* Free old user_data before replacing */
                 cmark_node_set_user_data(table, combined);
+                free(attrs);
+            } else {
                 free(attrs);
             }
         } else {
@@ -376,8 +504,48 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                     }
                 }
 
-                /* Process spans */
+                /* Process spans - this also detects caption rows and tfoot rows */
                 process_table_spans(cur);
+
+                /* After processing spans, check if any row is a caption row */
+                /* Check all rows in the table (especially the last one) */
+                cmark_node *row_check = cmark_node_first_child(cur);
+                cmark_node *caption_row = NULL;
+                while (row_check) {
+                    if (cmark_node_get_type(row_check) == CMARK_NODE_TABLE_ROW && is_caption_row(row_check)) {
+                        caption_row = row_check;
+                        /* Continue to find the last caption row if there are multiple */
+                    }
+                    row_check = cmark_node_next(row_check);
+                }
+
+                /* If we found a caption row, extract the caption and mark row for removal */
+                if (caption_row) {
+                    cmark_node *cell = cmark_node_first_child(caption_row);
+                    if (cell) {
+                        cmark_node *text_node = cmark_node_first_child(cell);
+                        if (text_node && cmark_node_get_type(text_node) == CMARK_NODE_TEXT) {
+                            const char *text = cmark_node_get_literal(text_node);
+                            if (text && text[0] == '[') {
+                                const char *end = strchr(text + 1, ']');
+                                if (end) {
+                                    size_t caption_len = end - text - 1;
+                                    char *caption = malloc(caption_len + 1);
+                                    if (caption) {
+                                        memcpy(caption, text + 1, caption_len);
+                                        caption[caption_len] = '\0';
+                                        add_table_caption(cur, caption);
+                                        free(caption);
+                                        /* Mark the entire row for removal */
+                                        char *existing = (char *)cmark_node_get_user_data(caption_row);
+                                        if (existing) free(existing);
+                                        cmark_node_set_user_data(caption_row, strdup(" data-remove=\"true\""));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
