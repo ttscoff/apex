@@ -491,24 +491,32 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                 /* Check for caption before table */
                 cmark_node *prev = cmark_node_previous(cur);
                 if (prev) {
-                    char *caption = NULL;
-                    if (is_table_caption(prev, &caption)) {
-                        add_table_caption(cur, caption);
-                        /* Mark caption paragraph for removal */
-                        cmark_node_set_user_data(prev, strdup(" data-remove=\"true\""));
-                        free(caption);
+                    char *prev_data = (char *)cmark_node_get_user_data(prev);
+                    /* Skip paragraphs that have already been used as captions */
+                    if (!prev_data || !strstr(prev_data, "data-remove")) {
+                        char *caption = NULL;
+                        if (is_table_caption(prev, &caption)) {
+                            add_table_caption(cur, caption);
+                            /* Mark caption paragraph for removal so it is not reused */
+                            cmark_node_set_user_data(prev, strdup(" data-remove=\"true\""));
+                            free(caption);
+                        }
                     }
                 }
 
                 /* Check for caption after table */
                 cmark_node *next = cmark_node_next(cur);
                 if (next) {
-                    char *caption = NULL;
-                    if (is_table_caption(next, &caption)) {
-                        add_table_caption(cur, caption);
-                        /* Mark caption paragraph for removal */
-                        cmark_node_set_user_data(next, strdup(" data-remove=\"true\""));
-                        free(caption);
+                    char *next_data = (char *)cmark_node_get_user_data(next);
+                    /* Skip paragraphs that have already been used as captions */
+                    if (!next_data || !strstr(next_data, "data-remove")) {
+                        char *caption = NULL;
+                        if (is_table_caption(next, &caption)) {
+                            add_table_caption(cur, caption);
+                            /* Mark caption paragraph for removal so it is not reused */
+                            cmark_node_set_user_data(next, strdup(" data-remove=\"true\""));
+                            free(caption);
+                        }
                     }
                 }
 

@@ -40,6 +40,18 @@ char *apex_inject_header_ids(const char *html, cmark_node *document, bool genera
 char *apex_clean_html_tag_spacing(const char *html);
 
 /**
+ * Collapse newlines and surrounding whitespace *between* adjacent tags in
+ * non-pretty HTML. For example:
+ *   </table>\n\n<figure>  ->  </table><figure>
+ *
+ * Only affects whitespace between a closing '>' and the next '<' where there
+ * is at least one newline, leaving text content and code blocks untouched.
+ * @param html The HTML to process
+ * @return Newly allocated HTML with inter-tag newlines collapsed (must be freed)
+ */
+char *apex_collapse_intertag_newlines(const char *html);
+
+/**
  * Convert thead to tbody for relaxed tables
  * Converts <thead><tr><th>...</th></tr></thead> to <tbody><tr><td>...</td></tr></tbody>
  * for tables that were created from relaxed table input (no separator rows)

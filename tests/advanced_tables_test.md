@@ -21,11 +21,17 @@ This table combines both rowspan and colspan features:
 
 
 
-| h1  | h2  | h3  |
-| --- | :-: | --- |
-| d1  | d2  | d3  |
-| d1  | d2  | d3  |
-| === | === | === |
-| d-4 | d-5 | d-6 |
+| h1  |  h2   | h3  |
+| --- | :---: | --- |
+| d1  |  d2   | d3  |
+| d1  |  d2   | d3  |
+| === |  ===  | === |
+| d-4 |  d-5  | d-6 |
+[table with footer]
 
-[table with multiple headers]
+| h1  |  h2   | h3  |
+| --- | :---: | --- |
+| d1  |  d2   | d3  |
+| d1  |  d2   | d3  |
+
+Table: Table with Pandoc caption

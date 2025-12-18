@@ -948,6 +948,164 @@ static char *apex_protect_liquid_tags(const char *text,
     return output;
 }
 
+/**
+ * Preprocess table captions to normalize different syntaxes before parsing.
+ *
+ * Handles two cases:
+ * 1. Contiguous [Caption] lines immediately following a table row:
+ *    - Detects a caption line like "[Caption]" directly after a line
+ *      containing table cells (with '|').
+ *    - Inserts a blank line between the table row and the caption line so
+ *      cmark-gfm parses the caption as a separate paragraph, which our
+ *      existing caption logic already understands.
+ *
+ * 2. Pandoc-style captions using "Table: Caption" after a table:
+ *    - When a line starting with "Table:" immediately follows a table row,
+ *      converts it to a MultiMarkdown-style caption "[Caption]" and inserts
+      a blank line before it.
+ *    - The caption text is trimmed of surrounding whitespace.
+ *
+ * NOTE: This is a text-level transform that runs before any table parsing
+ * or advanced table processing. It intentionally skips fenced code blocks.
+ */
+static char *apex_preprocess_table_captions(const char *text) {
+    if (!text) return NULL;
+
+    size_t len = strlen(text);
+    /* Allow room for extra blank lines and brackets when converting captions */
+    size_t cap = len * 2 + 1;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+
+    const char *read = text;
+    char *write = out;
+    bool prev_line_was_table_row = false;
+    bool in_code_block = false;
+
+    while (*read) {
+        const char *line_start = read;
+        const char *line_end = strchr(read, '\n');
+        bool has_newline = (line_end != NULL);
+        if (!line_end) {
+            line_end = read + strlen(read);
+        }
+
+        /* Determine line properties */
+        const char *p = line_start;
+        while (p < line_end && (*p == ' ' || *p == '\t')) {
+            p++;
+        }
+
+        /* Track fenced code blocks (``` or ~~~) and skip caption transforms inside */
+        if (!in_code_block &&
+            (line_end - p) >= 3 &&
+            ((p[0] == '`' && p[1] == '`' && p[2] == '`') ||
+             (p[0] == '~' && p[1] == '~' && p[2] == '~'))) {
+            in_code_block = true;
+        } else if (in_code_block &&
+                   (line_end - p) >= 3 &&
+                   ((p[0] == '`' && p[1] == '`' && p[2] == '`') ||
+                    (p[0] == '~' && p[1] == '~' && p[2] == '~'))) {
+            in_code_block = false;
+        }
+
+        bool is_table_row_line = false;
+        bool is_bracket_caption_line = false;
+        bool is_pandoc_caption_line = false;
+        bool is_blank_line = false;
+
+        if (!in_code_block) {
+            /* Treat any line containing '|' as a candidate table row */
+            for (const char *q = line_start; q < line_end; q++) {
+                if (*q == '|') {
+                    is_table_row_line = true;
+                    break;
+                }
+            }
+
+            if (p >= line_end) {
+                is_blank_line = true;
+            } else if (*p == '[') {
+                is_bracket_caption_line = true;
+            } else if ((size_t)(line_end - p) >= 6 &&
+                       strncmp(p, "Table:", 6) == 0) {
+                is_pandoc_caption_line = true;
+            }
+        }
+
+        size_t line_len = (size_t)(line_end - line_start);
+
+        if (!in_code_block &&
+            prev_line_was_table_row &&
+            is_bracket_caption_line) {
+            /* Case 1: [Caption] immediately after table row -> insert blank line */
+            *write++ = '\n';
+            memcpy(write, line_start, line_len);
+            write += line_len;
+            if (has_newline) {
+                *write++ = '\n';
+            }
+        } else if (!in_code_block &&
+                   prev_line_was_table_row &&
+                   is_pandoc_caption_line) {
+            /* Case 2: Pandoc-style 'Table: Caption' -> convert to '[Caption]' */
+            const char *caption_start = p + 6; /* after 'Table:' */
+            while (caption_start < line_end &&
+                   (*caption_start == ' ' || *caption_start == '\t')) {
+                caption_start++;
+            }
+            const char *caption_end = line_end;
+            while (caption_end > caption_start &&
+                   (caption_end[-1] == ' ' || caption_end[-1] == '\t' ||
+                    caption_end[-1] == '\r')) {
+                caption_end--;
+            }
+
+            if (caption_end > caption_start) {
+                size_t caption_len = (size_t)(caption_end - caption_start);
+                *write++ = '\n';      /* blank line between table and caption */
+                *write++ = '[';
+                memcpy(write, caption_start, caption_len);
+                write += caption_len;
+                *write++ = ']';
+                if (has_newline) {
+                    *write++ = '\n';
+                }
+            } else {
+                /* Empty caption text - fall back to copying the line as-is */
+                memcpy(write, line_start, line_len);
+                write += line_len;
+                if (has_newline) {
+                    *write++ = '\n';
+                }
+            }
+        } else {
+            /* Default: copy line unchanged */
+            memcpy(write, line_start, line_len);
+            write += line_len;
+            if (has_newline) {
+                *write++ = '\n';
+            }
+        }
+
+        read = has_newline ? line_end + 1 : line_end;
+        if (!in_code_block) {
+            if (is_table_row_line) {
+                /* Remember that the last non-blank, table-looking line was a row */
+                prev_line_was_table_row = true;
+            } else if (!is_blank_line) {
+                /* Any non-blank, non-table line clears the table-row context */
+                prev_line_was_table_row = false;
+            }
+            /* Blank lines preserve prev_line_was_table_row so that
+             * 'Table: Caption' can appear after one or more blank lines. */
+        }
+    }
+
+    *write = '\0';
+    return out;
+}
+
 static char *apex_restore_liquid_tags(const char *html,
                                       char **tags,
                                       size_t tag_count) {
@@ -2274,6 +2432,20 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
+    /* Normalize table captions before parsing (preprocessing)
+     * - Ensure contiguous [Caption] lines become separate paragraphs
+     * - Convert Pandoc-style 'Table: Caption' lines to [Caption]
+     */
+    char *table_captions_processed = NULL;
+    if (options->enable_tables) {
+        PROFILE_START(table_captions_preprocess);
+        table_captions_processed = apex_preprocess_table_captions(text_ptr);
+        PROFILE_END(table_captions_preprocess);
+        if (table_captions_processed) {
+            text_ptr = table_captions_processed;
+        }
+    }
+
     /* Process definition lists before parsing (preprocessing) */
     char *deflist_processed = NULL;
     if (options->enable_definition_lists) {
@@ -2667,6 +2839,20 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
+    /* In non-pretty mode, collapse extra newlines between adjacent tags so that
+     * sequences like </table>\n\n<figure> become </table><figure>. This keeps
+     * compact HTML output while still letting pretty mode control layout.
+     */
+    if (html && !local_opts.pretty) {
+        PROFILE_START(collapse_intertag_newlines);
+        char *collapsed = apex_collapse_intertag_newlines(html);
+        PROFILE_END(collapse_intertag_newlines);
+        if (collapsed) {
+            free(html);
+            html = collapsed;
+        }
+    }
+
     /* Convert thead to tbody for relaxed tables (if relaxed tables were processed) */
     if (html && options->relaxed_tables && options->enable_tables && relaxed_tables_processed) {
         PROFILE_START(relaxed_tables_convert);
@@ -2716,6 +2902,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     if (highlights_processed) free(highlights_processed);
     if (alpha_lists_processed) free(alpha_lists_processed);
     if (relaxed_tables_processed) free(relaxed_tables_processed);
+    if (table_captions_processed) free(table_captions_processed);
     if (deflist_processed) free(deflist_processed);
     if (metadata_replaced) free(metadata_replaced);
     if (autolinks_processed) free(autolinks_processed);

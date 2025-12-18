@@ -319,6 +319,36 @@ char *apex_pretty_print_html(const char *html) {
 
     *write = '\0';
 
+    /* Collapse sequences of more than two consecutive newlines down to
+     * exactly two, so we never produce more than a single blank line
+     * between blocks in pretty-printed output.
+     */
+    size_t out_len = strlen(output);
+    char *collapsed = malloc(out_len + 1);
+    if (collapsed) {
+        const char *r = output;
+        char *w = collapsed;
+        int newline_run = 0;
+
+        while (*r) {
+            if (*r == '\n') {
+                newline_run++;
+                if (newline_run <= 2) {
+                    *w++ = *r++;
+                } else {
+                    /* Skip extra newlines beyond two */
+                    r++;
+                }
+            } else {
+                newline_run = 0;
+                *w++ = *r++;
+            }
+        }
+        *w = '\0';
+        free(output);
+        output = collapsed;
+    }
+
     #undef WRITE_STR
     #undef WRITE_CHAR
     #undef WRITE_INDENT

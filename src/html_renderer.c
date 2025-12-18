@@ -869,6 +869,71 @@ char *apex_clean_html_tag_spacing(const char *html) {
 }
 
 /**
+ * Collapse newlines and surrounding whitespace between adjacent tags.
+ *
+ * Example:
+ *   "</table>\n\n<figure>" -> "</table><figure>"
+ *
+ * Strategy:
+ * - Whenever we see a '>' character, look ahead over any combination of
+ *   spaces/tabs/newlines/carriage returns.
+ * - If the next non-whitespace character is '<' and there was at least one
+ *   newline in the skipped range, we drop all of that whitespace so the tags
+ *   become adjacent.
+ * - Otherwise, we leave the whitespace untouched.
+ *
+ * This keeps text content (including code/pre blocks) intact, while
+ * compacting vertical spacing between block-level HTML elements in
+ * non-pretty mode.
+ */
+char *apex_collapse_intertag_newlines(const char *html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char *output = malloc(len + 1);
+    if (!output) return NULL;
+
+    const char *read = html;
+    char *write = output;
+
+    while (*read) {
+        if (*read == '>') {
+            /* Copy the '>' */
+            *write++ = *read++;
+
+            /* Look ahead over whitespace between this tag and the next content */
+            const char *look = read;
+            int newline_count = 0;
+            while (*look == ' ' || *look == '\t' || *look == '\n' || *look == '\r') {
+                if (*look == '\n' || *look == '\r') {
+                    newline_count++;
+                }
+                look++;
+            }
+
+            if (newline_count > 0 && *look == '<') {
+                /* We are between two tags. Compress any run of newlines here so that
+                 * \n{2,} becomes exactly \n\n (one blank line), and a single newline
+                 * stays a single newline.
+                 */
+                int to_emit = (newline_count >= 2) ? 2 : 1;
+                for (int i = 0; i < to_emit; i++) {
+                    *write++ = '\n';
+                }
+                read = look;
+                continue;
+            }
+            /* Otherwise, fall through and let the normal loop copy whitespace */
+        }
+
+        *write++ = *read++;
+    }
+
+    *write = '\0';
+    return output;
+}
+
+/**
  * Check if a table cell contains only em dashes and whitespace
  */
 static bool cell_contains_only_dashes(const char *cell_start, const char *cell_end) {
