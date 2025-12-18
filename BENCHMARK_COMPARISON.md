@@ -13,17 +13,17 @@ Found 7 tools:
 
 ## Processor Comparison
 
-**File:** `/Users/ttscoff/Desktop/Code/apex/tests/comprehensive_test.md` (17017 bytes, 621 lines)
+**File:** `/Users/ttscoff/Desktop/Code/apex/tests/comprehensive_test.md` (17015 bytes, 619 lines)
 
 | Processor | Time (ms) | Relative |
 |-----------|-----------|----------|
-| apex | 89.00 | 1.00x |
-| cmark-gfm | 20.00 | .22x |
-| cmark | 20.00 | .22x |
-| pandoc | 108.00 | 1.21x |
-| multimarkdown | 23.00 | .25x |
-| kramdown | 353.00 | 3.96x |
-| marked | 102.00 | 1.14x |
+| apex | 21.00 | 1.00x |
+| cmark-gfm | 18.00 | .85x |
+| cmark | 17.00 | .80x |
+| pandoc | 107.00 | 5.09x |
+| multimarkdown | 17.00 | .80x |
+| kramdown | 333.00 | 15.85x |
+| marked | 102.00 | 4.85x |
 
 ## Apex Mode Comparison
 
@@ -31,22 +31,22 @@ Found 7 tools:
 
 | Mode | Time (ms) | Relative |
 |------|-----------|----------|
-| commonmark | 79.00 | 1.00x |
-| gfm | 82.00 | 1.03x |
-| mmd | 93.00 | 1.17x |
-| kramdown | 87.00 | 1.10x |
-| unified | 96.00 | 1.21x |
-| default (unified) | 90.00 | 1.13x |
+| commonmark | 18.00 | 1.00x |
+| gfm | 19.00 | 1.05x |
+| mmd | 20.00 | 1.11x |
+| kramdown | 20.00 | 1.11x |
+| unified | 21.00 | 1.16x |
+| default (unified) | 21.00 | 1.16x |
 
 ## Apex Feature Overhead
 
 | Features | Time (ms) |
 |----------|-----------|
-| CommonMark (minimal) | 78.00 |
-| + GFM tables/strikethrough | 87.00 |
-| + All Apex features | 91.00 |
-| + Pretty printing | 92.00 |
-| + Standalone document | 94.00 |
+| CommonMark (minimal) | 17.00 |
+| + GFM tables/strikethrough | 19.00 |
+| + All Apex features | 21.00 |
+| + Pretty printing | 21.00 |
+| + Standalone document | 21.00 |
 
 ---
 
