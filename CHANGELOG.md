@@ -2,6 +2,34 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.39] - 2025-12-19
+
+### Changed
+
+- Table post-processing now tracks all cells (including removed ones) to correctly map HTML column positions to original AST column indices, ensuring attributes are applied to the correct cells.
+- Added content-based detection for ^^ marker cells during HTML post-processing to ensure they are properly removed even when attribute matching fails.
+
+### New
+
+- Added content verification to prevent false matches when cells are covered by rowspans
+- Added tracking of previous cell's colspan to detect and remove empty cells after colspan
+- Added detection and removal of === marker rows in tfoot sections
+
+### Improved
+
+- Rowspan cell tracking now uses a per-column active cell approach (inspired by Jekyll Spaceship) for more reliable rowspan calculation across complex table structures.
+- Cell matching now uses position-based fallback to previous row when current row match fails
+- Row mapping accounts for rowspan coverage to correctly identify visible columns
+- Tfoot row detection now uses AST row indices instead of HTML row indices for accuracy
+
+### Fixed
+
+- Table rowspan rendering now correctly handles rows where most cells use ^^ markers. Previously, cells like "Beta" and "Gamma" in rows with multiple ^^ cells would be missing or appear in the wrong position. The fix includes proper mapping between HTML row indices and AST row indices, accounting for separator rows that are removed from HTML output.
+- Missing cells after colspan (e.g., "92.00" cell was missing when "Absent" had colspan="2")
+- Rowspan not applying correctly when HTML row mapping was off by one
+- Footer alignment rows (=== markers) appearing in output instead of being removed
+- Empty cells after colspan not being removed from rendered HTML
+
 ## [0.1.38] - 2025-12-18
 
 ### Changed
@@ -569,6 +597,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 - Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.39]: https://github.com/ttscoff/apex/releases/tag/v0.1.39
 [0.1.38]: https://github.com/ttscoff/apex/releases/tag/v0.1.38
 [0.1.37]: https://github.com/ttscoff/apex/releases/tag/v0.1.37
 [0.1.36]: https://github.com/ttscoff/apex/releases/tag/v0.1.36
