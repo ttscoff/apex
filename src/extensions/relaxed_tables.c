@@ -199,28 +199,65 @@ static char *generate_separator_row(int num_columns, bool starts_with_pipe) {
 }
 
 /**
+ * Check if a line looks like a table row (contains pipes and non-separator content)
+ */
+static bool is_table_row(const char *line, size_t len) {
+    if (!line || len == 0) return false;
+
+    /* Must contain a pipe */
+    bool has_pipe = false;
+    bool has_content = false;
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)line[i];
+        if (c == '|') {
+            has_pipe = true;
+        } else if (!isspace(c) && c != '-') {
+            /* Has content that's not just dashes */
+            has_content = true;
+        }
+    }
+
+    /* Must have both pipe and non-dash content */
+    return has_pipe && has_content;
+}
+
+/**
  * Generate a dummy header row (empty cells) for a given number of columns
  * This will be removed in post-processing
+ * @param num_columns Number of columns
+ * @param starts_with_pipe If true, generate header starting with | to match separator format
  */
-__attribute__((unused))
-static char *generate_dummy_header_row(int num_columns) {
+static char *generate_dummy_header_row(int num_columns, bool starts_with_pipe) {
     if (num_columns < 1) return NULL;
 
-    /* Allocate enough space: "|" + (num_columns-1) * " |" + "\n" */
-    size_t len = 1 + (num_columns - 1) * 3 + 1 + 1;  /* Extra for safety */
+    /* Calculate size: need space for pipes and spaces */
+    size_t len;
+    if (starts_with_pipe) {
+        /* "| " + num_columns * " | " + "\n" + null */
+        len = 2 + num_columns * 4 + 1 + 1;
+    } else {
+        /* num_columns * " |" + "\n" + null */
+        len = num_columns * 3 + 1 + 1;
+    }
+
     char *header = malloc(len);
     if (!header) return NULL;
 
     char *p = header;
-    *p++ = '|';
-
-    for (int i = 0; i < num_columns - 1; i++) {
-        *p++ = ' ';
+    if (starts_with_pipe) {
         *p++ = '|';
+        *p++ = ' ';
     }
 
-    *p++ = ' ';
-    *p++ = '|';
+    for (int i = 0; i < num_columns; i++) {
+        *p++ = ' ';
+        *p++ = '|';
+        if (i < num_columns - 1 || !starts_with_pipe) {
+            *p++ = ' ';
+        }
+    }
+
     *p++ = '\n';
     *p = '\0';
 
@@ -1051,6 +1088,166 @@ char *apex_process_relaxed_tables(const char *text) {
     if (strcmp(text, output) == 0) {
         free(output);
         return NULL;  /* No changes */
+    }
+
+    return output;
+}
+
+/**
+ * Process headerless tables - detect separator rows without header rows and insert dummy headers
+ * This allows alignment to be applied to tables that start with a separator row
+ */
+char *apex_process_headerless_tables(const char *text) {
+    if (!text) return NULL;
+
+    size_t text_len = strlen(text);
+    if (text_len == 0) return NULL;
+
+    /* Allocate output buffer */
+    size_t output_capacity = text_len * 2;
+    char *output = malloc(output_capacity);
+    if (!output) return NULL;
+
+    const char *read = text;
+    char *write = output;
+    size_t remaining = output_capacity;
+    size_t output_len = 0;
+
+    /* Track previous line for context */
+    bool prev_line_is_table_row = false;
+
+    /* Process line by line */
+    while (*read) {
+        const char *line_start = read;
+        const char *line_end = strchr(read, '\n');
+        if (!line_end) {
+            line_end = read + strlen(read);
+        }
+
+        size_t line_len = line_end - line_start;
+        bool has_newline = (*line_end == '\n');
+
+        /* Skip to next line for next iteration */
+        const char *next_line_start = has_newline ? line_end + 1 : line_end;
+
+        /* Check if this is a separator or table row */
+        bool is_separator = is_separator_row(line_start, line_len);
+        bool is_table = is_table_row(line_start, line_len);
+
+        /* Check if we have a separator row that's not part of a valid table:
+         * - Previous line is NOT a table row (so separator has no header)
+         * - This line IS a separator row
+         * - Next line IS a table row (so separator is followed by data)
+         */
+        if (is_separator && !prev_line_is_table_row) {
+            /* Look ahead to see if next non-blank line is a table row */
+            const char *look_ahead = next_line_start;
+            bool found_table_row = false;
+
+            while (*look_ahead) {
+                const char *next_line_end = strchr(look_ahead, '\n');
+                if (!next_line_end) {
+                    next_line_end = look_ahead + strlen(look_ahead);
+                }
+
+                size_t next_line_len = next_line_end - look_ahead;
+
+                if (!is_blank_line(look_ahead, next_line_len)) {
+                    /* Found next non-blank line */
+                    if (is_table_row(look_ahead, next_line_len)) {
+                        found_table_row = true;
+                    }
+                    break;
+                }
+
+                look_ahead = (*next_line_end == '\n') ? next_line_end + 1 : next_line_end;
+                if (look_ahead >= text + text_len) break;
+            }
+
+            if (found_table_row) {
+                /* We need to insert a dummy header row before the separator */
+                int num_columns = count_columns(line_start, line_len);
+                if (num_columns > 0) {
+                    /* Check if separator starts with pipe to match format */
+                    size_t start = 0;
+                    while (start < line_len && (line_start[start] == ' ' || line_start[start] == '\t')) {
+                        start++;
+                    }
+                    bool starts_with_pipe = (start < line_len && line_start[start] == '|');
+                    char *dummy_header = generate_dummy_header_row(num_columns, starts_with_pipe);
+
+                    if (dummy_header) {
+                        size_t header_len = strlen(dummy_header);
+
+                        /* Ensure we have space for header + original line */
+                        while (output_len + header_len + line_len + 10 > output_capacity) {
+                            output_capacity *= 2;
+                            char *new_output = realloc(output, output_capacity);
+                            if (!new_output) {
+                                free(dummy_header);
+                                free(output);
+                                return NULL;
+                            }
+                            write = new_output + output_len;
+                            output = new_output;
+                            remaining = output_capacity - output_len;
+                        }
+
+                        /* Write dummy header */
+                        memcpy(write, dummy_header, header_len);
+                        write += header_len;
+                        output_len += header_len;
+                        remaining -= header_len;
+
+                        free(dummy_header);
+                    }
+                }
+            }
+        }
+
+        /* Copy the current line to output */
+        if (line_len + 1 > remaining) {
+            output_capacity *= 2;
+            char *new_output = realloc(output, output_capacity);
+            if (!new_output) {
+                free(output);
+                return NULL;
+            }
+            write = new_output + output_len;
+            output = new_output;
+            remaining = output_capacity - output_len;
+        }
+
+        memcpy(write, line_start, line_len);
+        write += line_len;
+        output_len += line_len;
+        remaining -= line_len;
+
+        if (has_newline) {
+            *write++ = '\n';
+            output_len++;
+            remaining--;
+        }
+
+        /* Update tracking for next iteration */
+        prev_line_is_table_row = is_table && !is_separator;
+
+        /* Move to next line */
+        read = next_line_start;
+    }
+
+    /* Null terminate */
+    if (remaining > 0) {
+        *write = '\0';
+    } else {
+        free(output);
+        return NULL;
+    }
+
+    /* If nothing changed, return NULL to allow caller to use original */
+    if (strcmp(text, output) == 0) {
+        free(output);
+        return NULL;
     }
 
     return output;

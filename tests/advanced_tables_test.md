@@ -47,3 +47,14 @@ Use `^^` to merge cells vertically (rowspan):
 | d1  | d2  | d3  |
 
 Table: Table with Pandoc caption
+
+
+| ----: | :-----: | :----- |
+| a---a | b-----b | c----c |
+| 1     | 2       | 3      |
+
+Table: Table without header row
+
+[Relaxed table]
+| a   | b   | c   |
+| 1-1 | 2-2 | 3-3 |

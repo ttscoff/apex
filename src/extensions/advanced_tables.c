@@ -182,13 +182,10 @@ static void process_table_spans(cmark_node *table) {
             /* Skip span processing for header row */
             if (is_first_row) {
                 is_first_row = false;
-                row_idx = 0;
                 prev_row = row;
                 row = cmark_node_next(row);
                 continue;
             }
-
-            row_idx++; /* Increment row index for data rows */
 
             /* Check if this row is a tfoot row (contains ===) */
             /* Once we encounter a tfoot row, all subsequent rows are in tfoot */

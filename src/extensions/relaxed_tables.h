@@ -23,6 +23,14 @@ extern "C" {
  */
 char *apex_process_relaxed_tables(const char *text);
 
+/**
+ * Process headerless tables - detect separator rows without header rows and insert dummy headers
+ * This allows alignment to be applied to tables that start with a separator row
+ * @param text Input markdown text
+ * @return Newly allocated text with dummy headers inserted (must be freed), or NULL if no changes
+ */
+char *apex_process_headerless_tables(const char *text);
+
 #ifdef __cplusplus
 }
 #endif

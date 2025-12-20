@@ -2439,6 +2439,20 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
+    /* Process headerless tables before parsing (preprocessing)
+     * Detect separator rows without header rows and insert dummy headers
+     * This must run after relaxed tables processing
+     */
+    char *headerless_tables_processed = NULL;
+    if (options->enable_tables) {
+        PROFILE_START(headerless_tables);
+        headerless_tables_processed = apex_process_headerless_tables(text_ptr);
+        PROFILE_END(headerless_tables);
+        if (headerless_tables_processed) {
+            text_ptr = headerless_tables_processed;
+        }
+    }
+
     /* Normalize table captions before parsing (preprocessing)
      * - Ensure contiguous [Caption] lines become separate paragraphs
      * - Convert Pandoc-style 'Table: Caption' lines to [Caption]
@@ -2860,8 +2874,8 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
-    /* Convert thead to tbody for relaxed tables (if relaxed tables were processed) */
-    if (html && options->relaxed_tables && options->enable_tables && relaxed_tables_processed) {
+    /* Convert thead to tbody for relaxed tables and remove empty thead from headerless tables */
+    if (html && options->enable_tables) {
         PROFILE_START(relaxed_tables_convert);
         char *converted = apex_convert_relaxed_table_headers(html);
         PROFILE_END(relaxed_tables_convert);
@@ -2909,6 +2923,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     if (highlights_processed) free(highlights_processed);
     if (alpha_lists_processed) free(alpha_lists_processed);
     if (relaxed_tables_processed) free(relaxed_tables_processed);
+    if (headerless_tables_processed) free(headerless_tables_processed);
     if (table_captions_processed) free(table_captions_processed);
     if (deflist_processed) free(deflist_processed);
     if (metadata_replaced) free(metadata_replaced);

@@ -1032,6 +1032,78 @@ char *apex_convert_relaxed_table_headers(const char *html) {
             const char *thead_end = strstr(after_thead, "</thead>");
             const char *tbody_start = strstr(after_thead, "<tbody>");
 
+            if (thead_end) {
+                /* Check if thead contains only empty cells (dummy headers from headerless tables) */
+                bool all_cells_empty = true;
+                bool found_any_th = false;
+
+                /* Search for all <th> or <th ...> tags in thead */
+                const char *search = after_thead;
+                while (search < thead_end) {
+                    /* Check for <th> without attributes */
+                    if (strncmp(search, "<th>", 4) == 0) {
+                        found_any_th = true;
+                        const char *th_end = strstr(search, "</th>");
+                        if (!th_end || th_end >= thead_end) {
+                            all_cells_empty = false;
+                            break;
+                        }
+                        /* Check if content between > and </th> is empty */
+                        const char *content_start = search + 4; /* After <th>, which is > */
+                        if (content_start < th_end) {
+                            while (content_start < th_end) {
+                                if (!isspace((unsigned char)*content_start)) {
+                                    all_cells_empty = false;
+                                    break;
+                                }
+                                content_start++;
+                            }
+                        }
+                        /* If content_start >= th_end, tags are adjacent (empty) - OK */
+                        if (!all_cells_empty) break;
+                        search = th_end + 5; /* Move past </th> */
+                    }
+                    /* Check for <th with attributes */
+                    else if (strncmp(search, "<th", 3) == 0 &&
+                             (search[3] == ' ' || search[3] == '\t' || search[3] == '>')) {
+                        found_any_th = true;
+                        /* Find the closing > of opening tag */
+                        const char *tag_end = strchr(search, '>');
+                        if (!tag_end || tag_end >= thead_end) {
+                            all_cells_empty = false;
+                            break;
+                        }
+                        const char *th_end = strstr(tag_end, "</th>");
+                        if (!th_end || th_end >= thead_end) {
+                            all_cells_empty = false;
+                            break;
+                        }
+                        /* Check content between > and </th> */
+                        const char *content_start = tag_end + 1;
+                        if (content_start < th_end) {
+                            while (content_start < th_end) {
+                                if (!isspace((unsigned char)*content_start)) {
+                                    all_cells_empty = false;
+                                    break;
+                                }
+                                content_start++;
+                            }
+                        }
+                        /* If content_start >= th_end, tags are adjacent (empty) - OK */
+                        if (!all_cells_empty) break;
+                        search = th_end + 5; /* Move past </th> */
+                    } else {
+                        search++;
+                    }
+                }
+
+                /* If we found th cells and they're all empty, remove the entire thead */
+                if (found_any_th && all_cells_empty) {
+                    read = thead_end + 8; /* Skip <thead>...</thead> */
+                    continue;
+                }
+            }
+
             if (thead_end && tbody_start && thead_end < tbody_start) {
                 /* Check if tbody contains a separator row (row with only em dashes) */
                 bool has_separator_row = false;
