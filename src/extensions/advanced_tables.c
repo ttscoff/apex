@@ -169,6 +169,7 @@ static void process_table_spans(cmark_node *table) {
     cmark_node *prev_row = NULL;
     bool is_first_row = true; /* Track header row */
     bool in_tfoot_section = false; /* Track if we've entered tfoot section */
+    int row_index = 0; /* For debugging rowspan behavior */
 
     /* Track active rowspan cells per column (inspired by Jekyll Spaceship).
      * active_rowspan[col] points to the cell node that's currently being rowspanned in that column.
@@ -179,12 +180,9 @@ static void process_table_spans(cmark_node *table) {
 
     while (row) {
         if (cmark_node_get_type(row) == CMARK_NODE_TABLE_ROW) {
-            /* Skip span processing for header row */
+            /* Process span for header row too - don't skip it */
             if (is_first_row) {
                 is_first_row = false;
-                prev_row = row;
-                row = cmark_node_next(row);
-                continue;
             }
 
             /* Check if this row is a tfoot row (contains ===) */
@@ -284,7 +282,7 @@ static void process_table_spans(cmark_node *table) {
             }
 
             cmark_node *cell = cmark_node_first_child(row);
-            cmark_node *prev_cell = NULL;
+            cmark_node *prev_cell = NULL;  /* Always reset to NULL at start of each row */
             int col_index = 0;
 
             /* Note: We don't initialize active_rowspan here because it persists across rows.
@@ -295,10 +293,34 @@ static void process_table_spans(cmark_node *table) {
             while (cell) {
                 if (cmark_node_get_type(cell) == CMARK_NODE_TABLE_CELL) {
                     /* Check for colspan */
-                    if (is_colspan_cell(cell)) {
+                    bool is_colspan = is_colspan_cell(cell);
+                    if (is_colspan) {
+                        /* Only process colspan if we have a previous cell in the SAME ROW */
+                        if (!prev_cell || cmark_node_parent(prev_cell) != row) {
+                            /* No previous cell in same row, can't do colspan.
+                             * This happens for:
+                             * 1. First cell in a row (prev_cell is NULL)
+                             * 2. First non-empty cell after removed cells (prev_cell is from previous row)
+                             * In these cases, mark empty cells for removal. */
+                            cmark_node *child = cmark_node_first_child(cell);
+                            if (child == NULL) {
+                                /* Empty cell with no previous cell - mark for removal */
+                                char *existing = (char *)cmark_node_get_user_data(cell);
+                                if (existing) free(existing);
+                                cmark_node_set_user_data(cell, strdup(" data-remove=\"true\""));
+                            }
+                            prev_cell = cell;
+                            col_index++;
+                            cell = cmark_node_next(cell);
+                            continue;
+                        }
                         /* Find the first non-empty cell going backwards (skip cells marked for removal) */
                         cmark_node *target_cell = prev_cell;
                         while (target_cell) {
+                            /* Verify target_cell is in the same row */
+                            if (cmark_node_parent(target_cell) != row) {
+                                break; /* target_cell is not in the same row, stop */
+                            }
                             char *target_attrs = (char *)cmark_node_get_user_data(target_cell);
                             /* Skip cells marked for removal */
                             if (!target_attrs || !strstr(target_attrs, "data-remove")) {
@@ -312,30 +334,68 @@ static void process_table_spans(cmark_node *table) {
                             target_cell = prev;
                         }
 
-                        if (target_cell) {
-                            /* Get or create colspan attribute */
-                            char *prev_attrs = (char *)cmark_node_get_user_data(target_cell);
-                            int current_colspan = 1;
+                        if (target_cell && cmark_node_parent(target_cell) == row) {
+                            /* Merge empty cells with the previous cell to create colspan.
+                             * This handles both:
+                             * - Consecutive empty cells (like |||) merging together
+                             * - Empty cells after a content cell (like | header |||) merging with the content cell
+                             *
+                             * However, we need to be careful: a single empty cell between two content cells
+                             * (like | Absent | | 92.00 |) should NOT merge, as that's just a missing value.
+                             *
+                             * The distinction: if the target_cell is empty, we're merging consecutive empty cells.
+                             * If the target_cell has content, we're merging an empty cell with content (colspan).
+                             * Both cases are valid for creating colspan. */
 
-                            if (prev_attrs && strstr(prev_attrs, "colspan=")) {
-                                sscanf(strstr(prev_attrs, "colspan="), "colspan=\"%d\"", &current_colspan);
+                            /* Check if target_cell is empty (consecutive empty cells) */
+                            bool target_is_empty = is_colspan_cell(target_cell);
+
+                            /* Check if the next cell (after current) has content.
+                             * If target has content AND next also has content, don't merge (isolated empty cell).
+                             * Example: | Absent | | 92.00 | - empty cell between two content cells should NOT merge.
+                             * But if target has content and next is empty or end-of-row, merge (empty cells after content).
+                             * Example: | header ||| - empty cells after content should merge. */
+                            cmark_node *next_cell = cmark_node_next(cell);
+                            while (next_cell && cmark_node_get_type(next_cell) != CMARK_NODE_TABLE_CELL) {
+                                next_cell = cmark_node_next(next_cell);
+                            }
+                            bool next_has_content = false;
+                            if (next_cell && cmark_node_get_type(next_cell) == CMARK_NODE_TABLE_CELL) {
+                                cmark_node *next_child = cmark_node_first_child(next_cell);
+                                next_has_content = (next_child != NULL && !is_colspan_cell(next_cell));
                             }
 
-                            /* Increment colspan - append or replace */
-                            char new_attrs[256];
-                            if (prev_attrs && !strstr(prev_attrs, "colspan=")) {
-                                /* Append to existing attributes */
-                                snprintf(new_attrs, sizeof(new_attrs), "%s colspan=\"%d\"", prev_attrs, current_colspan + 1);
-                            } else {
-                                /* Replace or create new */
-                                snprintf(new_attrs, sizeof(new_attrs), " colspan=\"%d\"", current_colspan + 1);
-                            }
-                            /* Free old user_data before setting new */
-                            if (prev_attrs) free(prev_attrs);
-                            cmark_node_set_user_data(target_cell, strdup(new_attrs));
+                            /* Merge if:
+                             * 1. Target is empty (consecutive empty cells merge together), OR
+                             * 2. Target has content AND next is empty/end (empty cells after content merge with content) */
+                            bool should_merge = target_is_empty || (!target_is_empty && !next_has_content);
 
-                            /* Mark current cell for removal */
-                            cmark_node_set_user_data(cell, strdup(" data-remove=\"true\""));
+                            if (should_merge) {
+                                /* Target cell is empty or has << marker - merge them (colspan) */
+                                /* Get or create colspan attribute */
+                                char *prev_attrs = (char *)cmark_node_get_user_data(target_cell);
+                                int current_colspan = 1;
+
+                                if (prev_attrs && strstr(prev_attrs, "colspan=")) {
+                                    sscanf(strstr(prev_attrs, "colspan="), "colspan=\"%d\"", &current_colspan);
+                                }
+
+                                /* Increment colspan - append or replace */
+                                char new_attrs[256];
+                                if (prev_attrs && !strstr(prev_attrs, "colspan=")) {
+                                    /* Append to existing attributes */
+                                    snprintf(new_attrs, sizeof(new_attrs), "%s colspan=\"%d\"", prev_attrs, current_colspan + 1);
+                                } else {
+                                    /* Replace or create new */
+                                    snprintf(new_attrs, sizeof(new_attrs), " colspan=\"%d\"", current_colspan + 1);
+                                }
+                                /* Free old user_data before setting new */
+                                if (prev_attrs) free(prev_attrs);
+                                cmark_node_set_user_data(target_cell, strdup(new_attrs));
+
+                                /* Mark current cell for removal */
+                                cmark_node_set_user_data(cell, strdup(" data-remove=\"true\""));
+                            }
                         }
                     }
                     /* Check for rowspan */
@@ -344,6 +404,14 @@ static void process_table_spans(cmark_node *table) {
                          * If there's an active rowspan cell, increment its rowspan.
                          * Otherwise, find the cell in the previous row and make it active. */
                         cmark_node *target_cell = active_rowspan[col_index];
+
+                        /* Debug: log rowspan marker and current row/column */
+                        cmark_node *rs_child = cmark_node_first_child(cell);
+                        const char *rs_text = rs_child && cmark_node_get_type(rs_child) == CMARK_NODE_TEXT
+                                              ? cmark_node_get_literal(rs_child)
+                                              : NULL;
+                        fprintf(stderr, "DEBUG RS: marker at row=%d col=%d text=\"%s\"\n",
+                                row_index, col_index, rs_text ? rs_text : "(null)");
 
                         /* If no active cell, find one in the previous row */
                         if (!target_cell && prev_row) {
@@ -390,6 +458,14 @@ static void process_table_spans(cmark_node *table) {
                             /* Free old user_data before setting new */
                             if (prev_attrs) free(prev_attrs);
                             cmark_node_set_user_data(target_cell, strdup(new_attrs));
+
+                            /* Debug: log target cell for rowspan */
+                            cmark_node *t_child = cmark_node_first_child(target_cell);
+                            const char *t_text = t_child && cmark_node_get_type(t_child) == CMARK_NODE_TEXT
+                                                 ? cmark_node_get_literal(t_child)
+                                                 : NULL;
+                            fprintf(stderr, "DEBUG RS: applying rowspan to row=%d col=%d text=\"%s\" new_rowspan=%d\n",
+                                    row_index - 1, col_index, t_text ? t_text : "(null)", current_rowspan + 1);
                         }
                         /* Always mark rowspan cell for removal, even if target not found */
                         char *existing = (char *)cmark_node_get_user_data(cell);

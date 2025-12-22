@@ -1505,15 +1505,22 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
 
         /* Check for cell opening tags */
         if (in_row && (strncmp(read, "<td", 3) == 0 || strncmp(read, "<th", 3) == 0)) {
-            /* Extract cell content for debugging */
+            /* Extract cell content for debugging and matching */
             char cell_preview[100] = {0};
+            bool is_th = strncmp(read, "<th", 3) == 0;
+            const char *close_tag = is_th ? "</th>" : "</td>";
             const char *content_start = strchr(read, '>');
             if (content_start) {
-                const char *content_end = strstr(content_start + 1, "</td>");
-                if (!content_end) content_end = strstr(content_start + 1, "</th>");
+                const char *content_end = strstr(content_start + 1, close_tag);
                 if (content_end && content_end - content_start - 1 < 99) {
-                    strncpy(cell_preview, content_start + 1, content_end - content_start - 1);
-                    cell_preview[content_end - content_start - 1] = '\0';
+                    /* Extract just the content between > and </td>/</th> */
+                    size_t len = content_end - content_start - 1;
+                    strncpy(cell_preview, content_start + 1, len);
+                    cell_preview[len] = '\0';
+                    /* Trim trailing whitespace and newlines */
+                    while (len > 0 && (cell_preview[len-1] == '\n' || cell_preview[len-1] == '\r' || isspace((unsigned char)cell_preview[len-1]))) {
+                        cell_preview[--len] = '\0';
+                    }
                 }
             }
 
@@ -1533,6 +1540,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              * For tfoot rows with === markers, also check the previous AST row since the row mapping
              * might skip the === row if all its cells are marked for removal. */
             cell_attr *matching = NULL;
+
             if (target_original_col >= 0) {
                 /* First, try to match in the current AST row */
                 for (cell_attr *a = attrs; a; a = a->next) {
@@ -1586,51 +1594,113 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                     }
                 }
 
-                /* If no match found in current row, try the previous AST row as a fallback.
-                 * This handles cases where row detection is off by one. We try matching by
-                 * column position in the previous row. This is safe because:
-                 * 1. We only do this if there's no match in the current row
-                 * 2. We match by column position, not content (works for all tables)
-                 * 3. This is a fallback for row detection issues, not the primary matching method
-                 *
-                 * IMPORTANT: Don't match empty cells - they should be removed, not matched to previous row cells. */
-                if (!matching && row_idx > 0 && target_original_col >= 0 && cell_preview[0] != '\0') {
-                    int prev_html_row = row_idx - 1;
-                    int prev_ast_row = -1;
-                    int prev_html_row_count = -1;
-                    for (int r = 0; r < 100; r++) {
-                        bool has_non_removed = false;
-                        for (all_cell *c = all_cells; c; c = c->next) {
-                            if (c->table_index == table_idx &&
-                                c->row_index == r &&
-                                !c->is_removed) {
-                                has_non_removed = true;
-                                break;
+                /* Don't use fallback matching to previous row - it causes incorrect attribute application.
+                 * If no match is found in the current row, that's correct - the cell doesn't have any attributes. */
+            }
+
+            /* Content-based fallback matching for header/footer rows (or when column-based matching fails).
+             * This is important because column mapping can be wrong for rows with colspans.
+             * Match cells by content and prioritize cells with colspan/rowspan attributes. */
+            if (!matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
+                cell_attr *content_match = NULL;
+                cell_attr *span_match = NULL;
+
+                /* Try to find a cell in the same AST row by matching content */
+                for (cell_attr *a = attrs; a; a = a->next) {
+                    if (a->table_index == table_idx &&
+                        a->row_index == ast_row_idx &&
+                        a->cell_text) {
+                        const char *attr_text = a->cell_text;
+                        const char *html_text = cell_preview;
+                        /* Skip leading whitespace */
+                        while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
+                        while (*html_text && isspace((unsigned char)*html_text)) html_text++;
+                        /* Compare - use lenient comparison */
+                        size_t attr_len = strlen(attr_text);
+                        size_t html_len = strlen(html_text);
+                        /* Skip trailing whitespace for comparison */
+                        while (attr_len > 0 && isspace((unsigned char)attr_text[attr_len - 1])) attr_len--;
+                        while (html_len > 0 && isspace((unsigned char)html_text[html_len - 1])) html_len--;
+                        if (attr_len > 0 && html_len > 0 &&
+                            attr_len == html_len &&
+                            strncmp(attr_text, html_text, attr_len) == 0) {
+                            /* Found a match by content */
+                            if (!content_match) {
+                                content_match = a;  /* Remember first content match */
                             }
-                        }
-                        if (has_non_removed) {
-                            prev_html_row_count++;
-                            if (prev_html_row_count == prev_html_row) {
-                                prev_ast_row = r;
-                                break;
-                            }
-                        }
-                    }
-                    if (prev_ast_row >= 0) {
-                        /* Try to match in previous AST row. Check both target_original_col and target_original_col-1
-                         * because column mapping might be off by one due to rowspan issues.
-                         * IMPORTANT: Don't match cells marked for removal - they shouldn't be in the previous row. */
-                        for (cell_attr *a = attrs; a; a = a->next) {
-                            if (a->table_index == table_idx &&
-                                a->row_index == prev_ast_row &&
-                                (a->col_index == target_original_col ||
-                                 (target_original_col > 0 && a->col_index == target_original_col - 1)) &&
-                                !strstr(a->attributes, "data-remove")) {  /* Don't match removed cells */
-                                matching = a;
-                                break;
+                            /* Prefer matches with colspan/rowspan attributes */
+                            if (strstr(a->attributes, "colspan") || strstr(a->attributes, "rowspan")) {
+                                span_match = a;
+                                break;  /* Found the best match, stop searching */
                             }
                         }
                     }
+                }
+
+                /* Use span_match if available, otherwise use content_match */
+                if (span_match) {
+                    matching = span_match;
+                } else if (content_match) {
+                    matching = content_match;
+                }
+            }
+
+            /* Final safety fallback for rowspan cells:
+             * If we still don't have a match, but this HTML cell's text matches exactly one AST cell
+             * in the same table that has a rowspan attribute, use that. This ensures that rowspans
+             * computed in the AST (e.g., for the last ^^ in a block) always get injected, even if
+             * row/column mapping was slightly off.
+             *
+             * To avoid mis-applying attributes, we:
+             *  - Require an exact trimmed-text match
+             *  - Restrict to cells in the same table
+             *  - Restrict to cells that already have a \"rowspan\" attribute
+             *  - Require that the match be unique (only one candidate) */
+            if (!matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
+                cell_attr *rowspan_candidate = NULL;
+                bool multiple_candidates = false;
+
+                for (cell_attr *a = attrs; a; a = a->next) {
+                    if (a->table_index != table_idx) continue;
+                    /* Only consider cells in the same AST row, or at most one row above.
+                     * This allows us to recover from small row-mapping off-by-one errors
+                     * (e.g., when a header/body boundary shifts indices by 1), while
+                     * still preventing rowspans from leaking far down into unrelated
+                     * rows (like a later \"Active\" block). */
+                    int row_diff = ast_row_idx - a->row_index;
+                    if (row_diff < 0 || row_diff > 1) continue;
+                    if (!a->cell_text) continue;
+                    if (!strstr(a->attributes, "rowspan")) continue;
+
+                    const char *attr_text = a->cell_text;
+                    const char *html_text = cell_preview;
+
+                    /* Trim leading whitespace */
+                    while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
+                    while (*html_text && isspace((unsigned char)*html_text)) html_text++;
+
+                    /* Compute trimmed lengths */
+                    size_t attr_len = strlen(attr_text);
+                    size_t html_len = strlen(html_text);
+                    while (attr_len > 0 && isspace((unsigned char)attr_text[attr_len - 1])) attr_len--;
+                    while (html_len > 0 && isspace((unsigned char)html_text[html_len - 1])) html_len--;
+
+                    if (attr_len == 0 || html_len == 0) continue;
+                    if (attr_len != html_len) continue;
+                    if (strncmp(attr_text, html_text, attr_len) != 0) continue;
+
+                    /* We have an exact trimmed-text match for a rowspan cell in this table. */
+                    if (!rowspan_candidate) {
+                        rowspan_candidate = a;
+                    } else {
+                        /* More than one candidate with same text - ambiguous, bail out. */
+                        multiple_candidates = true;
+                        break;
+                    }
+                }
+
+                if (rowspan_candidate && !multiple_candidates) {
+                    matching = rowspan_candidate;
                 }
             }
 
@@ -1661,23 +1731,41 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                 should_remove_cell = true;
             } else if (is_rowspan_marker) {
                 should_remove_cell = true;
-            } else if (cell_preview[0] == '\0' && prev_cell_matching) {
-                /* Check if previous cell has colspan.
-                 * If the previous cell has colspan > 1, and this empty cell is
-                 * at the next column position, it should be removed (it's the cell that was merged). */
-                if (strstr(prev_cell_matching->attributes, "colspan")) {
+            }
+
+            /* Check if this empty cell should be removed.
+             * Only remove empty cells that are explicitly marked for removal in the AST (part of a colspan).
+             * We need to check both:
+             * 1. Cells in the mapping (target_original_col >= 0) - check if marked for removal
+             * 2. Cells not in the mapping (target_original_col < 0) - these might be part of colspan,
+             *    but we should only remove if the previous cell in the same row has colspan.
+             *
+             * IMPORTANT: Be conservative - only remove empty cells if we're certain they're part of a colspan.
+             * Don't remove legitimate empty cells. */
+            if (!should_remove_cell && cell_preview[0] == '\0' && ast_row_idx >= 0) {
+                if (target_original_col >= 0) {
+                    /* Cell is in the mapping - check if explicitly marked for removal in AST */
+                    for (cell_attr *a = attrs; a; a = a->next) {
+                        if (a->table_index == table_idx &&
+                            a->row_index == ast_row_idx &&
+                            a->col_index == target_original_col &&
+                            strstr(a->attributes, "data-remove")) {
+                            should_remove_cell = true;
+                            break;
+                        }
+                    }
+                } else if (target_original_col < 0 &&
+                           prev_cell_matching &&
+                           prev_cell_matching->row_index == ast_row_idx &&
+                           strstr(prev_cell_matching->attributes, "colspan")) {
+                    /* Cell not in mapping - check if previous cell in same row has colspan > 1.
+                     * This is a strong indicator that the empty cell is part of the colspan. */
                     int colspan_val = 1;
                     if (strstr(prev_cell_matching->attributes, "colspan=")) {
                         sscanf(strstr(prev_cell_matching->attributes, "colspan="), "colspan=\"%d\"", &colspan_val);
                     }
-                    /* If the previous cell has colspan > 1, and this empty cell is
-                     * at the next column position, it should be removed */
                     if (colspan_val > 1) {
-                        /* Check if this cell is at the next column after the previous cell */
-                        int prev_col = prev_cell_matching->col_index;
-                        if (target_original_col == prev_col + 1 || target_original_col == prev_col) {
-                            should_remove_cell = true;
-                        }
+                        should_remove_cell = true;
                     }
                 }
             }
@@ -1701,7 +1789,8 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                 if (strncmp(read, close_tag, 5) == 0) read += 5;
 
                 col_idx++;  /* Increment to match column index from collection (counts all cells) */
-                prev_cell_matching = NULL;  /* Reset previous cell matching for removed cells */
+                /* Don't reset prev_cell_matching for removed cells - keep it so we can remove
+                 * subsequent empty cells that are part of the same colspan range */
                 continue;
             } else if (matching && (strstr(matching->attributes, "rowspan") || strstr(matching->attributes, "colspan"))) {
                 /* Copy opening tag */

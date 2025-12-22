@@ -37,6 +37,7 @@ Use `^^` to merge cells vertically (rowspan):
 | header |||
 | ---- | ---- | ---- |
 | data | data | data |
+| data | data | data |
 | ==== | === | === |
 | footer |||
 
