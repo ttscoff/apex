@@ -683,7 +683,7 @@ int main(int argc, char *argv[]) {
                             return 1;
                         }
                         if (add_script_tag(&script_tags, &script_tag_count, &script_tag_capacity,
-                                           "<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js\"></script>") != 0) {
+                                           "<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js\" onload=\"renderMathInElement(document.body, {delimiters: [{left: '\\\\[', right: '\\\\]', display: true}, {left: '\\\\\\(', right: '\\\\\\)', display: false}], ignoredClasses: ['math']}); document.querySelectorAll('span.math').forEach(function(el){var text=el.textContent.trim();if(text.indexOf('\\\\\(')==0)text=text.slice(2,-2);else if(text.indexOf('\\\\\\[')==0)text=text.slice(2,-2);var isDisplay=el.classList.contains('display');try{katex.render(text,el,{displayMode:isDisplay,throwOnError:false});}catch(e){}});\"></script>") != 0) {
                             free(arg_copy);
                             return 1;
                         }

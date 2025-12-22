@@ -2875,7 +2875,8 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     }
 
     /* Convert thead to tbody for relaxed tables and remove empty thead from headerless tables */
-    if (html && options->enable_tables) {
+    /* Only run this when relaxed_tables is enabled, otherwise keep thead as-is */
+    if (html && options->enable_tables && options->relaxed_tables) {
         PROFILE_START(relaxed_tables_convert);
         char *converted = apex_convert_relaxed_table_headers(html);
         PROFILE_END(relaxed_tables_convert);
@@ -3221,8 +3222,55 @@ char *apex_wrap_html_document(const char *content, const char *title, const char
     const char *doc_title = title ? title : "Document";
     const char *lang = language ? language : "en";
 
-    /* Calculate buffer size */
+    /* Strip any existing </body></html> tags from end of content to avoid duplicates */
     size_t content_len = strlen(content);
+    const char *html_end = NULL;
+    const char *body_end = NULL;
+
+    /* Find last occurrence of </html> near the end */
+    const char *search = content + content_len;
+    while (search > content) {
+        search--;
+        if (strncmp(search, "</html>", 7) == 0) {
+            html_end = search;
+            break;
+        }
+    }
+
+    /* If we found </html>, look for </body> before it */
+    if (html_end) {
+        search = html_end;
+        while (search > content) {
+            search--;
+            if (strncmp(search, "</body>", 7) == 0) {
+                body_end = search;
+                break;
+            }
+            /* Stop if we hit a non-whitespace character before finding </body> */
+            if (!isspace((unsigned char)*search) && *search != '>') {
+                break;
+            }
+        }
+
+        /* If we found both tags at the end, strip them */
+        if (body_end) {
+            /* Check that there's only whitespace/newlines between </body> and </html> */
+            const char *between = body_end + 7;
+            bool only_whitespace = true;
+            while (between < html_end) {
+                if (!isspace((unsigned char)*between)) {
+                    only_whitespace = false;
+                    break;
+                }
+                between++;
+            }
+
+            if (only_whitespace) {
+                /* Strip everything from </body> to end */
+                content_len = body_end - content;
+            }
+        }
+    }
     size_t title_len = strlen(doc_title);
     size_t style_len = stylesheet_path ? strlen(stylesheet_path) : 0;
     size_t header_len = html_header ? strlen(html_header) : 0;
