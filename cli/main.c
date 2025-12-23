@@ -57,7 +57,8 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "Apex Markdown Processor v%s\n", apex_version_string());
     fprintf(stderr, "One Markdown processor to rule them all\n\n");
     fprintf(stderr, "Usage: %s [options] [file]\n", program_name);
-    fprintf(stderr, "       %s --combine [files...]\n\n", program_name);
+    fprintf(stderr, "       %s --combine [files...]\n", program_name);
+    fprintf(stderr, "       %s --mmd-merge [index files...]\n\n", program_name);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  --accept               Accept all Critic Markup changes (apply edits)\n");
     fprintf(stderr, "  --[no-]includes        Enable file inclusion (enabled by default in unified mode)\n");
@@ -112,7 +113,9 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  -v, --version          Show version information\n");
     fprintf(stderr, "  --combine              Concatenate Markdown files (expanding includes) into a single Markdown stream\n");
     fprintf(stderr, "                         When a SUMMARY.md file is provided, treat it as a GitBook index and combine\n");
-    fprintf(stderr, "                         the linked files in order. Output is raw Markdown suitable for piping back into Apex.\n\n");
+    fprintf(stderr, "                         the linked files in order. Output is raw Markdown suitable for piping back into Apex.\n");
+    fprintf(stderr, "  --mmd-merge            Merge files from one or more mmd_merge-style index files into a single Markdown stream\n");
+    fprintf(stderr, "                         Index files list document parts line-by-line; indentation controls header level shifting.\n\n");
     fprintf(stderr, "If no file is specified, reads from stdin.\n");
 }
 
@@ -363,6 +366,190 @@ static char *apex_cli_get_directory(const char *filepath) {
 }
 
 /**
+ * Shift Markdown header levels in content by a given indent.
+ *
+ * For each indent level, this performs the equivalent of the Perl:
+ *   $file =~ s/^#/##/gm;
+ *
+ * i.e., for each line that begins with '#', another '#' is inserted.
+ * Lines that do not begin with '#' are left unchanged.
+ */
+static char *apex_cli_shift_headers(const char *content, int indent) {
+    if (!content || indent <= 0) {
+        return content ? strdup(content) : NULL;
+    }
+
+    size_t len = strlen(content);
+    /* Worst case, every character is a header marker; be generous. */
+    size_t capacity = len * (size_t)(indent + 1) + 1;
+    char *buffer = malloc(capacity);
+    if (!buffer) return NULL;
+
+    char *out = buffer;
+    const char *in = content;
+
+    for (int level = 0; level < indent; level++) {
+        out = buffer;
+        in = (level == 0) ? content : buffer;
+
+        bool at_line_start = true;
+        while (*in) {
+            char c = *in;
+            if (at_line_start && c == '#') {
+                /* Duplicate initial '#' */
+                *out++ = '#';
+                *out++ = '#';
+                in++;
+                at_line_start = false;
+                continue;
+            }
+
+            *out++ = c;
+            if (c == '\n') {
+                at_line_start = true;
+            } else {
+                at_line_start = false;
+            }
+            in++;
+        }
+        *out = '\0';
+    }
+
+    return buffer;
+}
+
+/**
+ * Process a MultiMarkdown mmd_merge-style index file:
+ * - Each non-empty, non-comment line specifies a file to include
+ * - Indentation (tabs or 4-space groups) controls header level shifting
+ * - Lines whose first non-whitespace character is '#' are treated as comments
+ */
+static int apex_cli_mmd_merge_index(const char *index_path, FILE *out) {
+    if (!index_path || !out) return 1;
+
+    size_t len = 0;
+    char *index_content = read_file(index_path, &len);
+    if (!index_content) {
+        fprintf(stderr, "Error: Cannot read mmd-merge index '%s'\n", index_path);
+        return 1;
+    }
+
+    char *base_dir = apex_cli_get_directory(index_path);
+    char *cursor = index_content;
+
+    while (*cursor) {
+        char *line_start = cursor;
+        char *line_end = strchr(cursor, '\n');
+        if (!line_end) {
+            line_end = cursor + strlen(cursor);
+        }
+
+        /* Trim trailing whitespace (including CR) */
+        char *trim_end = line_end;
+        while (trim_end > line_start && (trim_end[-1] == ' ' || trim_end[-1] == '\t' ||
+                                         trim_end[-1] == '\r')) {
+            trim_end--;
+        }
+
+        size_t line_len = (size_t)(trim_end - line_start);
+
+        if (line_len > 0) {
+            /* Make a null-terminated copy for easier processing */
+            char *line = malloc(line_len + 1);
+            if (!line) {
+                free(index_content);
+                if (base_dir) free(base_dir);
+                return 1;
+            }
+            memcpy(line, line_start, line_len);
+            line[line_len] = '\0';
+
+            /* Skip leading whitespace to check for blank or comment lines */
+            char *p = line;
+            while (*p == ' ' || *p == '\t') p++;
+
+            if (*p != '\0' && *p != '#') {
+                /* Count indentation: tabs and groups of 4 spaces at start of line */
+                int indent = 0;
+                char *q = line;
+                while (*q == ' ' || *q == '\t') {
+                    if (*q == '\t') {
+                        indent++;
+                        q++;
+                    } else {
+                        int spaces = 0;
+                        while (*q == ' ' && spaces < 4) {
+                            spaces++;
+                            q++;
+                        }
+                        if (spaces == 4) {
+                            indent++;
+                        } else {
+                            /* Fewer than 4 trailing spaces at start are ignored for indent */
+                            break;
+                        }
+                    }
+                }
+
+                /* Extract filename from the remainder of the line */
+                while (*q == ' ' || *q == '\t') q++;
+                char *name_start = q;
+                char *name_end = name_start + strlen(name_start);
+                while (name_end > name_start &&
+                       (name_end[-1] == ' ' || name_end[-1] == '\t')) {
+                    name_end--;
+                }
+                *name_end = '\0';
+
+                if (*name_start) {
+                    char full_path[4096];
+                    if (name_start[0] == '/') {
+                        /* Absolute path */
+                        snprintf(full_path, sizeof(full_path), "%s", name_start);
+                    } else {
+                        snprintf(full_path, sizeof(full_path), "%s/%s",
+                                 base_dir ? base_dir : ".",
+                                 name_start);
+                    }
+
+                    size_t file_len = 0;
+                    char *file_content = read_file(full_path, &file_len);
+                    if (!file_content) {
+                        fprintf(stderr, "Warning: Skipping unreadable file '%s' from mmd-merge index '%s'\n",
+                                full_path, index_path);
+                    } else {
+                        char *shifted = apex_cli_shift_headers(file_content, indent);
+                        if (!shifted) {
+                            shifted = file_content;
+                            file_content = NULL;
+                        }
+
+                        fputs(shifted, out);
+                        fputc('\n', out);
+                        fputc('\n', out);
+
+                        if (shifted != file_content && shifted) {
+                            free(shifted);
+                        }
+                        if (file_content) {
+                            free(file_content);
+                        }
+                    }
+                }
+            }
+
+            free(line);
+        }
+
+        cursor = (*line_end == '\n') ? line_end + 1 : line_end;
+    }
+
+    free(index_content);
+    if (base_dir) free(base_dir);
+    return 0;
+}
+
+/**
  * Process a single Markdown file:
  * - Read content
  * - Extract metadata (for transclude base)
@@ -536,6 +723,12 @@ int main(int argc, char *argv[]) {
     char **combine_files = NULL;
     size_t combine_file_count = 0;
     size_t combine_file_capacity = 0;
+
+    /* mmd-merge mode: emulate MultiMarkdown mmd_merge.pl behavior */
+    bool mmd_merge_mode = false;
+    char **mmd_merge_files = NULL;
+    size_t mmd_merge_file_count = 0;
+    size_t mmd_merge_file_capacity = 0;
 
     /* Bibliography files (NULL-terminated array) */
     char **bibliography_files = NULL;
@@ -922,6 +1115,8 @@ int main(int argc, char *argv[]) {
             }
         } else if (strcmp(argv[i], "--combine") == 0) {
             combine_mode = true;
+        } else if (strcmp(argv[i], "--mmd-merge") == 0) {
+            mmd_merge_mode = true;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
             print_usage(argv[0]);
@@ -940,6 +1135,18 @@ int main(int argc, char *argv[]) {
                     combine_file_capacity = new_cap;
                 }
                 combine_files[combine_file_count++] = argv[i];
+            } else if (mmd_merge_mode) {
+                if (mmd_merge_file_count >= mmd_merge_file_capacity) {
+                    size_t new_cap = mmd_merge_file_capacity ? mmd_merge_file_capacity * 2 : 8;
+                    char **tmp = realloc(mmd_merge_files, new_cap * sizeof(char *));
+                    if (!tmp) {
+                        fprintf(stderr, "Error: Memory allocation failed\n");
+                        return 1;
+                    }
+                    mmd_merge_files = tmp;
+                    mmd_merge_file_capacity = new_cap;
+                }
+                mmd_merge_files[mmd_merge_file_count++] = argv[i];
             } else {
                 /* Single-file mode: last positional wins (for compatibility) */
                 input_file = argv[i];
@@ -950,6 +1157,12 @@ int main(int argc, char *argv[]) {
     /* If --combine was provided but no files, error out early */
     if (combine_mode && combine_file_count == 0) {
         fprintf(stderr, "Error: --combine requires at least one input file\n");
+        return 1;
+    }
+
+    /* --combine and --mmd-merge are mutually exclusive */
+    if (combine_mode && mmd_merge_mode) {
+        fprintf(stderr, "Error: --combine and --mmd-merge cannot be used together\n");
         return 1;
     }
 
@@ -1397,6 +1610,39 @@ int main(int argc, char *argv[]) {
             apex_remote_free_plugins(plist);
             return 0;
         }
+    }
+
+    /* mmd-merge mode: emulate MultiMarkdown mmd_merge.pl and exit */
+    if (mmd_merge_mode) {
+        FILE *out = stdout;
+        if (output_file) {
+            out = fopen(output_file, "w");
+            if (!out) {
+                fprintf(stderr, "Error: Cannot open output file '%s'\n", output_file);
+                return 1;
+            }
+        }
+
+        if (mmd_merge_file_count == 0) {
+            fprintf(stderr, "Error: --mmd-merge requires at least one index file\n");
+            if (out != stdout) fclose(out);
+            return 1;
+        }
+
+        int rc = 0;
+        for (size_t i = 0; i < mmd_merge_file_count; i++) {
+            const char *path = mmd_merge_files[i];
+            if (!path) continue;
+            if (apex_cli_mmd_merge_index(path, out) != 0) {
+                rc = 1;
+                break;
+            }
+        }
+
+        if (out != stdout) {
+            fclose(out);
+        }
+        return rc;
     }
 
     /* Combine mode: concatenate Markdown files (with includes expanded) and exit */

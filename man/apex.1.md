@@ -12,6 +12,8 @@ apex - Unified Markdown processor supporting CommonMark, GFM, MultiMarkdown, and
 
 **apex** --combine [*files*...]
 
+**apex** --mmd-merge [*index files*...]
+
 # DESCRIPTION
 
 Apex is a unified Markdown processor that combines the best features from CommonMark, GitHub Flavored Markdown (GFM), MultiMarkdown, Kramdown, and Marked. One processor to rule them all.
@@ -203,6 +205,16 @@ The index is automatically generated at the end of the document or at the `<!--I
 
 **-v**, **--version**
 :   Show version information and exit.
+
+## Multi-file Utilities
+
+**--combine** *files...*
+:   Concatenate one or more Markdown files into a single Markdown stream, expanding all supported include syntaxes. When a `SUMMARY.md` file is provided, Apex treats it as a GitBook-style index and combines the linked files in order. Output is raw Markdown suitable for piping back into Apex.
+
+**--mmd-merge** *index files...*
+:   Merge files from one or more MultiMarkdown `mmd_merge`-style index files into a single Markdown stream. Each non-empty, non-comment line in an index file specifies a document to include. Lines whose first non-whitespace character is `#` are treated as comments and ignored. Indentation (tabs or groups of four spaces) before the filename increases the header level of the included document (each indent level shifts all Markdown headings in that file down one level). Output is raw Markdown suitable for piping into Apex, for example:
+
+    apex --mmd-merge index.txt | apex --mode mmd --standalone -o book.html
 
 # EXAMPLES
 
