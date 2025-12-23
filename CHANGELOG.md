@@ -2,6 +2,21 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.40] - 2025-12-20
+
+### New
+
+- Added inline table support for converting CSV/TSV text to Markdown tables
+- Support for ` ```table ` fenced code blocks that automatically convert CSV/TSV content to tables
+- Support for `<!--TABLE-->` markers that convert following CSV/TSV content to tables
+- Automatic delimiter detection: tabs detected as TSV, commas detected as CSV
+- Blocks without detected delimiters are left unchanged as regular code blocks
+
+### Improved
+
+- CSV/TSV conversion now works inline within documents, not just from file includes
+- Delimiter detection handles mixed content gracefully by checking for tabs first, then commas
+
 ## [0.1.39] - 2025-12-19
 
 ### Changed
@@ -597,6 +612,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 - Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.40]: https://github.com/ttscoff/apex/releases/tag/v0.1.40
 [0.1.39]: https://github.com/ttscoff/apex/releases/tag/v0.1.39
 [0.1.38]: https://github.com/ttscoff/apex/releases/tag/v0.1.38
 [0.1.37]: https://github.com/ttscoff/apex/releases/tag/v0.1.37

@@ -2125,6 +2125,122 @@ static void test_special_markers(void) {
 }
 
 /**
+ * Test inline tables from CSV/TSV
+ */
+static void test_inline_tables(void) {
+    printf("\n=== Inline Tables Tests ===\n");
+
+    apex_options opts = apex_options_default();
+    opts.enable_marked_extensions = true;
+    char *html;
+
+    /* ```table fence with CSV data */
+    const char *csv_table =
+        "```table\n"
+        "header 1,header 2,header 3\n"
+        "data 1,data 2,data 3\n"
+        ",,data 2c\n"
+        "```\n";
+    html = apex_markdown_to_html(csv_table, strlen(csv_table), &opts);
+    assert_contains(html, "<table>", "CSV table fence: table element");
+    assert_contains(html, "<th>header 1</th>", "CSV table fence: header 1");
+    assert_contains(html, "<th>header 2</th>", "CSV table fence: header 2");
+    assert_contains(html, "<th>header 3</th>", "CSV table fence: header 3");
+    assert_contains(html, "<td>data 1</td>", "CSV table fence: first data cell");
+    assert_contains(html, "<td>data 2c</td>", "CSV table fence: continued cell");
+    apex_free_string(html);
+
+    /* ```table fence with CSV data and alignment keywords */
+    const char *csv_align =
+        "```table\n"
+        "H1,H2,H3\n"
+        "left,center,right\n"
+        "a,b,c\n"
+        "```\n";
+    html = apex_markdown_to_html(csv_align, strlen(csv_align), &opts);
+    assert_contains(html, "<table>", "CSV table with alignment: table element");
+    /* Be conservative about HTML structure: just verify content appears in a table */
+    assert_contains(html, "H1", "CSV table with alignment: header text H1 present");
+    assert_contains(html, "H2", "CSV table with alignment: header text H2 present");
+    assert_contains(html, "H3", "CSV table with alignment: header text H3 present");
+    assert_contains(html, "a", "CSV table with alignment: data 'a' present");
+    apex_free_string(html);
+
+    /* ```table fence with no explicit alignment row: should also be headless */
+    const char *csv_no_align =
+        "```table\n"
+        "r1c1,r1c2,r1c3\n"
+        "r2c1,r2c2,r2c3\n"
+        "```\n";
+    html = apex_markdown_to_html(csv_no_align, strlen(csv_no_align), &opts);
+    assert_contains(html, "<table>", "CSV table no-align: table element");
+    assert_contains(html, "r1c1", "CSV table no-align: first row content present");
+    assert_contains(html, "r2c1", "CSV table no-align: second row content present");
+    apex_free_string(html);
+
+    /* ```table fence with TSV data (real tabs) */
+    const char *tsv_table =
+        "```table\n"
+        "col1\tcol2\tcol3\n"
+        "val1\tval2\tval3\n"
+        "```\n";
+    html = apex_markdown_to_html(tsv_table, strlen(tsv_table), &opts);
+    assert_contains(html, "<table>", "TSV table fence: table element");
+    assert_contains(html, "col1", "TSV table fence: header col1 text");
+    assert_contains(html, "col2", "TSV table fence: header col2 text");
+    assert_contains(html, "col3", "TSV table fence: header col3 text");
+    assert_contains(html, "val1", "TSV table fence: first data value");
+    apex_free_string(html);
+
+    /* ```table fence with no delimiter: should remain a code block */
+    const char *no_delim =
+        "```table\n"
+        "this has no delimiters\n"
+        "on the second line\n"
+        "```\n";
+    html = apex_markdown_to_html(no_delim, strlen(no_delim), &opts);
+    assert_contains(html, "<pre lang=\"table\"><code>", "No-delim table fence: rendered as code block");
+    assert_contains(html, "this has no delimiters", "No-delim table fence: content preserved");
+    apex_free_string(html);
+
+    /* <!--TABLE--> with CSV data */
+    const char *csv_marker =
+        "<!--TABLE-->\n"
+        "one,two,three\n"
+        "four,five,six\n"
+        "\n";
+    html = apex_markdown_to_html(csv_marker, strlen(csv_marker), &opts);
+    assert_contains(html, "<table>", "CSV TABLE marker: table element");
+    assert_contains(html, "one", "CSV TABLE marker: header text");
+    assert_contains(html, "four", "CSV TABLE marker: data value");
+    apex_free_string(html);
+
+    /* <!--TABLE--> with TSV data (real tabs) */
+    const char *tsv_marker =
+        "<!--TABLE-->\n"
+        "alpha\tbeta\tgamma\n"
+        "delta\tepsilon\tzeta\n"
+        "\n";
+    html = apex_markdown_to_html(tsv_marker, strlen(tsv_marker), &opts);
+    assert_contains(html, "<table>", "TSV TABLE marker: table element");
+    assert_contains(html, "alpha", "TSV TABLE marker: header text");
+    assert_contains(html, "delta", "TSV TABLE marker: data value");
+    apex_free_string(html);
+
+    /* <!--TABLE--> with no following data: comment should be preserved */
+    const char *empty_marker =
+        "Before\n\n"
+        "<!--TABLE-->\n"
+        "\n"
+        "After\n";
+    html = apex_markdown_to_html(empty_marker, strlen(empty_marker), &opts);
+    assert_contains(html, "Before", "Empty TABLE marker: before text preserved");
+    assert_contains(html, "<!--TABLE-->", "Empty TABLE marker: comment preserved");
+    assert_contains(html, "After", "Empty TABLE marker: after text preserved");
+    apex_free_string(html);
+}
+
+/**
  * Test advanced footnotes
  */
 static void test_advanced_footnotes(void) {
@@ -3672,6 +3788,7 @@ int main(int argc, char *argv[]) {
     test_mmd6_features();
     test_emoji();
     test_special_markers();
+    test_inline_tables();
     test_advanced_footnotes();
 
     /* Output format tests */

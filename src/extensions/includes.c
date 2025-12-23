@@ -169,61 +169,286 @@ static apex_file_type_t apex_detect_file_type(const char *filepath) {
 
 /**
  * Convert CSV/TSV to Markdown table
+ *
+ * Alignment handling:
+ * - First row is always treated as header.
+ * - If the second row cells are all one of: left, right, center, auto (case-insensitive),
+ *   it is treated as an alignment row and converted to :---, ---:, :---:, or ---.
+ *   The alignment row itself is NOT emitted as a data row.
+ * - Otherwise, a default '---' separator row is generated after the header.
+ *   The second row (including rows that contain only '-' and ':' characters) is emitted
+ *   as normal data.
  */
-static char *apex_csv_to_table(const char *csv_content, bool is_tsv) {
+char *apex_csv_to_table(const char *csv_content, bool is_tsv) {
     if (!csv_content) return NULL;
 
     char delim = is_tsv ? '\t' : ',';
     size_t len = strlen(csv_content);
-    char *output = malloc(len * 3);
-    if (!output) return NULL;
+    if (len == 0) return NULL;
 
-    char *write = output;
+    /* First pass: parse into rows and cells */
+    typedef struct {
+        char **cells;
+        int cell_count;
+    } csv_row_t;
+
+    int row_cap = 8;
+    int row_count = 0;
+    csv_row_t *rows = calloc(row_cap, sizeof(csv_row_t));
+    if (!rows) return NULL;
+
     const char *line_start = csv_content;
-    bool first_row = true;
-    int col_count = 0;
-
     while (*line_start) {
         const char *line_end = strchr(line_start, '\n');
-        if (!line_end) line_end = line_start + strlen(line_start);
+        if (!line_end) line_end = csv_content + strlen(csv_content);
 
-        *write++ = '|';
+        /* Allocate new row */
+        if (row_count >= row_cap) {
+            row_cap *= 2;
+            csv_row_t *tmp = realloc(rows, (size_t)row_cap * sizeof(csv_row_t));
+            if (!tmp) {
+                /* Cleanup already allocated cells */
+                for (int r = 0; r < row_count; r++) {
+                    for (int c = 0; c < rows[r].cell_count; c++) {
+                        free(rows[r].cells[c]);
+                    }
+                    free(rows[r].cells);
+                }
+                free(rows);
+                return NULL;
+            }
+            rows = tmp;
+        }
+
+        csv_row_t *row = &rows[row_count];
+        row->cells = NULL;
+        row->cell_count = 0;
+
+        int cell_cap = 8;
+        row->cells = malloc((size_t)cell_cap * sizeof(char *));
+        if (!row->cells) {
+            for (int r = 0; r < row_count; r++) {
+                for (int c = 0; c < rows[r].cell_count; c++) {
+                    free(rows[r].cells[c]);
+                }
+                free(rows[r].cells);
+            }
+            free(rows);
+            return NULL;
+        }
+
         const char *cell_start = line_start;
-        col_count = 0;
-
-        while (cell_start < line_end) {
+        while (cell_start <= line_end) {
             const char *cell_end = cell_start;
             while (cell_end < line_end && *cell_end != delim) cell_end++;
 
-            *write++ = ' ';
-            while (cell_start < cell_end) {
-                *write++ = *cell_start++;
+            if (row->cell_count >= cell_cap) {
+                cell_cap *= 2;
+                char **tmp_cells = realloc(row->cells, (size_t)cell_cap * sizeof(char *));
+                if (!tmp_cells) {
+                    /* Cleanup */
+                    for (int r = 0; r <= row_count; r++) {
+                        int max_c = (r == row_count) ? row->cell_count : rows[r].cell_count;
+                        char **cell_arr = (r == row_count) ? row->cells : rows[r].cells;
+                        if (cell_arr) {
+                            for (int c = 0; c < max_c; c++) {
+                                free(cell_arr[c]);
+                            }
+                            free(cell_arr);
+                        }
+                    }
+                    free(rows);
+                    return NULL;
+                }
+                row->cells = tmp_cells;
             }
-            *write++ = ' ';
-            *write++ = '|';
-            col_count++;
+
+            size_t cell_len = (size_t)(cell_end - cell_start);
+            char *cell = malloc(cell_len + 1);
+            if (!cell) {
+                for (int r = 0; r <= row_count; r++) {
+                    int max_c = (r == row_count) ? row->cell_count : rows[r].cell_count;
+                    char **cell_arr = (r == row_count) ? row->cells : rows[r].cells;
+                    if (cell_arr) {
+                        for (int c = 0; c < max_c; c++) {
+                            free(cell_arr[c]);
+                        }
+                        free(cell_arr);
+                    }
+                }
+                free(rows);
+                return NULL;
+            }
+            memcpy(cell, cell_start, cell_len);
+            cell[cell_len] = '\0';
+            row->cells[row->cell_count++] = cell;
 
             if (cell_end < line_end) cell_start = cell_end + 1;
             else break;
         }
-        *write++ = '\n';
 
-        /* Add separator after first row */
-        if (first_row) {
-            *write++ = '|';
-            for (int i = 0; i < col_count; i++) {
-                strcpy(write, " --- |");
-                write += 6;
-            }
-            *write++ = '\n';
-            first_row = false;
-        }
+        row_count++;
 
         line_start = line_end;
         if (*line_start == '\n') line_start++;
     }
 
+    if (row_count == 0) {
+        free(rows);
+        return NULL;
+    }
+
+    /* Determine column count from first row */
+    int col_count = rows[0].cell_count;
+    if (col_count <= 0) {
+        for (int r = 0; r < row_count; r++) {
+            for (int c = 0; c < rows[r].cell_count; c++) free(rows[r].cells[c]);
+            free(rows[r].cells);
+        }
+        free(rows);
+        return NULL;
+    }
+
+    /* Check for alignment row (second row with keywords) */
+    bool has_alignment_row = false;
+    enum { ALIGN_LEFT, ALIGN_RIGHT, ALIGN_CENTER, ALIGN_AUTO } *align = NULL;
+
+    if (row_count > 1) {
+        csv_row_t *arow = &rows[1];
+        bool all_keywords = (arow->cell_count == col_count);
+
+        if (all_keywords) {
+            align = malloc((size_t)col_count * sizeof(*align));
+            if (!align) {
+                for (int r = 0; r < row_count; r++) {
+                    for (int c = 0; c < rows[r].cell_count; c++) free(rows[r].cells[c]);
+                    free(rows[r].cells);
+                }
+                free(rows);
+                return NULL;
+            }
+
+            for (int i = 0; i < col_count; i++) {
+                char *cell = arow->cells[i];
+                /* Trim whitespace */
+                char *start = cell;
+                while (*start && isspace((unsigned char)*start)) start++;
+                char *end = start + strlen(start);
+                while (end > start && isspace((unsigned char)end[-1])) end--;
+                size_t tlen = (size_t)(end - start);
+
+                if (tlen == 0) { all_keywords = false; break; }
+
+                /* Lowercase copy for comparison */
+                char buf[16];
+                if (tlen >= sizeof(buf)) { all_keywords = false; break; }
+                for (size_t j = 0; j < tlen; j++) {
+                    buf[j] = (char)tolower((unsigned char)start[j]);
+                }
+                buf[tlen] = '\0';
+
+                if (strcmp(buf, "left") == 0) {
+                    align[i] = ALIGN_LEFT;
+                } else if (strcmp(buf, "right") == 0) {
+                    align[i] = ALIGN_RIGHT;
+                } else if (strcmp(buf, "center") == 0) {
+                    align[i] = ALIGN_CENTER;
+                } else if (strcmp(buf, "auto") == 0) {
+                    align[i] = ALIGN_AUTO;
+                } else {
+                    all_keywords = false;
+                    break;
+                }
+            }
+
+            if (!all_keywords) {
+                free(align);
+                align = NULL;
+            } else {
+                has_alignment_row = true;
+            }
+        }
+    }
+
+    /* Allocate output buffer: original size * 4 should be enough with extra alignment row */
+    char *output = malloc(len * 4 + 64);
+    if (!output) {
+        if (align) free(align);
+        for (int r = 0; r < row_count; r++) {
+            for (int c = 0; c < rows[r].cell_count; c++) free(rows[r].cells[c]);
+            free(rows[r].cells);
+        }
+        free(rows);
+        return NULL;
+    }
+
+    char *write = output;
+
+    /* Emit header row (first row) */
+    {
+        csv_row_t *row = &rows[0];
+        *write++ = '|';
+        for (int c = 0; c < col_count; c++) {
+            *write++ = ' ';
+            if (c < row->cell_count && row->cells[c]) {
+                const char *val = row->cells[c];
+                size_t vlen = strlen(val);
+                memcpy(write, val, vlen);
+                write += vlen;
+            }
+            *write++ = ' ';
+            *write++ = '|';
+        }
+        *write++ = '\n';
+    }
+
+    /* Emit separator/alignment row */
+    *write++ = '|';
+    for (int c = 0; c < col_count; c++) {
+        const char *spec = " --- ";
+        if (has_alignment_row && align) {
+            switch (align[c]) {
+                case ALIGN_LEFT:   spec = " :--- "; break;
+                case ALIGN_RIGHT:  spec = " ---: "; break;
+                case ALIGN_CENTER: spec = " :---: "; break;
+                case ALIGN_AUTO:   spec = " --- "; break;
+            }
+        }
+        size_t slen = strlen(spec);
+        memcpy(write, spec, slen);
+        write += slen;
+        *write++ = '|';
+    }
+    *write++ = '\n';
+
+    /* Emit data rows (skip alignment row if present) */
+    int start_row = has_alignment_row ? 2 : 1;
+    for (int r = start_row; r < row_count; r++) {
+        csv_row_t *row = &rows[r];
+        *write++ = '|';
+        for (int c = 0; c < col_count; c++) {
+            *write++ = ' ';
+            if (c < row->cell_count && row->cells[c]) {
+                const char *val = row->cells[c];
+                size_t vlen = strlen(val);
+                memcpy(write, val, vlen);
+                write += vlen;
+            }
+            *write++ = ' ';
+            *write++ = '|';
+        }
+        *write++ = '\n';
+    }
+
     *write = '\0';
+
+    if (align) free(align);
+    for (int r = 0; r < row_count; r++) {
+        for (int c = 0; c < rows[r].cell_count; c++) free(rows[r].cells[c]);
+        free(rows[r].cells);
+    }
+    free(rows);
+
     return output;
 }
 

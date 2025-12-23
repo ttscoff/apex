@@ -221,6 +221,34 @@ GitHub Flavored Markdown tables:
 | Cell 1   | Cell 2   |
 ```
 
+#### Inline tables from CSV/TSV
+
+You can turn inline CSV/TSV text into Markdown tables by using a fenced code
+block with the info string `table`. The delimiter is detected automatically:
+
+- If any non-blank line contains a tab, the block is treated as TSV.
+- Otherwise, if any non-blank line contains a comma, the block is treated as CSV.
+- If no tabs or commas are found, the block is left unchanged as a normal
+  `table`-info fenced code block.
+
+```table
+header 1,header 2,header 3
+data 1,data 2,data 3
+,,data 2c
+```
+
+Optionally, you can use an HTML comment marker to indicate that the following
+non-blank lines up to the next blank line should be treated as CSV/TSV data:
+
+```markdown
+<!--TABLE-->
+header 1,header 2,header 3
+data 1,data 2,data 3
+,,data 2c
+```
+
+The same delimiter-detection rules apply to `<!--TABLE-->` blocks.
+
 ### Task Lists
 
 ```markdown

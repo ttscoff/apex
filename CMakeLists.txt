@@ -118,6 +118,7 @@ set(APEX_LIB_SOURCES
     src/extensions/critic.c
     src/extensions/callouts.c
     src/extensions/includes.c
+    src/extensions/inline_tables.c
     src/extensions/toc.c
     src/extensions/abbreviations.c
     src/extensions/emoji.c

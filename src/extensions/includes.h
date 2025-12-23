@@ -38,6 +38,8 @@ char *apex_process_includes(const char *text, const char *base_dir, apex_metadat
  */
 bool apex_file_exists(const char *filepath);
 
+char *apex_csv_to_table(const char *csv_content, bool is_tsv);
+
 /**
  * Resolve wildcard path (e.g., file.* -> file.html)
  * Tries common extensions in order: .html, .md, .txt

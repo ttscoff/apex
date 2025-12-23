@@ -25,6 +25,7 @@
 #include "extensions/abbreviations.h"
 #include "extensions/emoji.h"
 #include "extensions/special_markers.h"
+#include "extensions/inline_tables.h"
 #include "extensions/ial.h"
 #include "extensions/definition_list.h"
 #include "extensions/advanced_footnotes.h"
@@ -2375,8 +2376,8 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         }
     }
 
-    /* Process special markers (^ end-of-block marker) BEFORE alpha lists */
-    /* This ensures ^ markers are converted to blank lines before alpha list processing */
+    /* Process special markers (^ end-of-block marker) and inline tables BEFORE alpha lists */
+    /* This ensures ^ markers and inline table markers are converted before alpha list processing */
     char *markers_processed_early = NULL;
     if (options->enable_marked_extensions) {
         PROFILE_START(special_markers);
@@ -2385,6 +2386,15 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         if (markers_processed_early) {
             text_ptr = markers_processed_early;
         }
+    }
+
+    /* Process inline table fences and <!--TABLE--> markers before parsing */
+    char *inline_tables_processed = NULL;
+    PROFILE_START(inline_tables);
+    inline_tables_processed = apex_process_inline_tables(text_ptr);
+    PROFILE_END(inline_tables);
+    if (inline_tables_processed) {
+        text_ptr = inline_tables_processed;
     }
 
     /* Process alpha lists before parsing (preprocessing) */

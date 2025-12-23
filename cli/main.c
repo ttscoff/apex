@@ -84,6 +84,7 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  --install-plugin ID    Install plugin by id from directory, or by Git URL/GitHub shorthand (user/repo)\n");
     fprintf(stderr, "  --link-citations       Link citations to bibliography entries\n");
     fprintf(stderr, "  --list-plugins         List installed plugins and available plugins from the remote directory\n");
+    fprintf(stderr, "  --uninstall-plugin ID  Uninstall plugin by id\n");
     fprintf(stderr, "  --meta KEY=VALUE       Set metadata key-value pair (can be used multiple times, supports quotes and comma-separated pairs)\n");
     fprintf(stderr, "  --meta-file FILE       Load metadata from external file (YAML, MMD, or Pandoc format)\n");
     fprintf(stderr, "  --[no-]mixed-lists     Allow mixed list markers at same level (inherit type from first item)\n");

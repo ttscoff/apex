@@ -112,6 +112,9 @@ If no file is specified, **apex** reads from stdin.
 **--relaxed-tables**, **--no-relaxed-tables**
 :   Enable relaxed table parsing (no separator rows required). Default: enabled in unified/kramdown modes, disabled in commonmark/gfm/multimarkdown modes.
 
+**--captions** *POSITION*
+:   Table caption position: **above** or **below** (default: **below**). Controls where table captions appear relative to the table.
+
 ## HTML and Links
 
 **--unsafe**, **--no-unsafe**
@@ -197,6 +200,20 @@ Index syntax is supported in MultiMarkdown and unified modes:
 - **TextIndex syntax**: `word{^}`, `[term]{^}`, `{^params}`
 
 The index is automatically generated at the end of the document or at the `<!--INDEX-->` marker if present. Entries are sorted alphabetically and can be grouped by first letter.
+
+## Plugins
+
+**--plugins**, **--no-plugins**
+:   Enable or disable external/plugin processing. Plugins extend Apex with custom processing capabilities.
+
+**--list-plugins**
+:   List installed plugins and available plugins from the remote directory. Shows both locally installed plugins and plugins available for installation from the Apex plugin directory.
+
+**--install-plugin** *ID*
+:   Install a plugin by ID from the remote directory, or by Git URL/GitHub shorthand (user/repo). Plugins are installed to `$XDG_CONFIG_HOME/apex/plugins` (or `~/.config/apex/plugins` when `XDG_CONFIG_HOME` is not set). When installing from a URL or GitHub shorthand, Apex will prompt for confirmation since plugins execute unverified code.
+
+**--uninstall-plugin** *ID*
+:   Uninstall a plugin by ID. Removes the plugin directory from the plugins folder. Apex will prompt for confirmation before removing the plugin.
 
 ## General Options
 
@@ -326,6 +343,7 @@ Apex supports a wide range of Markdown extensions:
 - **Metadata Control of Options**: Control command-line options via metadata for per-document configuration
 - **Header IDs**: Automatic or manual header IDs with multiple format options
 - **Relaxed Tables**: Support for tables without separator rows (Kramdown-style)
+- **Inline Tables from CSV/TSV**: Convert inline CSV/TSV text to tables using ```table fences or `<!--TABLE-->` markers
 - **Superscript/Subscript**: MultiMarkdown-style superscript (`^text`) and subscript (`~text~` within words) syntax. Subscript uses paired tildes within word boundaries (e.g., `H~2~O`), while tildes at word boundaries create underline
 - **Image Embedding**: Embed local images as base64 data URLs with `--embed-images` flag
 
