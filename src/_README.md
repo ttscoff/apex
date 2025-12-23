@@ -88,6 +88,7 @@ Apex is a unified Markdown processor that combines the best features from Common
 - **Pretty-print**: Formatted HTML with proper indentation for readability
 - **Header ID generation**: Automatic or manual header IDs with multiple format options (GFM, MMD, Kramdown)
 - **Header anchors**: Option to generate `<a>` anchor tags instead of header IDs
+- **ARIA accessibility**: Add ARIA labels and accessibility attributes (`--aria`) for better screen reader support, including aria-label on TOC navigation, role attributes on figures and tables, and aria-describedby linking tables to their captions
 
 ### Advanced Features
 
@@ -196,6 +197,7 @@ apex input.md --mode kramdown
 - `--id-format FORMAT` - Header ID format: `gfm`, `mmd`, or `kramdown`
 - `--no-ids` - Disable automatic header ID generation
 - `--header-anchors` - Generate `<a>` anchor tags instead of header IDs
+- `--aria` - Add ARIA labels and accessibility attributes to HTML output
 - `--bibliography FILE` - Bibliography file (BibTeX, CSL JSON, or CSL YAML) - can be used multiple times
 - `--csl FILE` - Citation style file (CSL format)
 - `--link-citations` - Link citations to bibliography entries

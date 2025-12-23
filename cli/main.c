@@ -97,6 +97,7 @@ static void print_usage(const char *program_name) {
     fprintf(stderr, "  --no-indices            Disable index processing\n");
     fprintf(stderr, "  --no-index              Suppress index generation (markers still created)\n");
     fprintf(stderr, "  --no-math              Disable math support\n");
+    fprintf(stderr, "  --aria                  Add ARIA labels and accessibility attributes to HTML output\n");
     fprintf(stderr, "  --no-plugins            Disable external/plugin processing\n");
     fprintf(stderr, "  --no-relaxed-tables    Disable relaxed table parsing\n");
     fprintf(stderr, "  --no-smart             Disable smart typography\n");
@@ -1004,6 +1005,8 @@ int main(int argc, char *argv[]) {
             options.enable_autolink = false;
         } else if (strcmp(argv[i], "--obfuscate-emails") == 0) {
             options.obfuscate_emails = true;
+        } else if (strcmp(argv[i], "--aria") == 0) {
+            options.enable_aria = true;
         } else if (strcmp(argv[i], "--no-plugins") == 0) {
             options.enable_plugins = false;
         } else if (strcmp(argv[i], "--wikilinks") == 0) {

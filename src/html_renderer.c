@@ -1766,3 +1766,273 @@ char *apex_adjust_quote_language(const char *html, const char *quotes_language) 
     return output;
 }
 
+/**
+ * Apply ARIA labels and accessibility attributes to HTML output
+ * @param html The HTML output
+ * @param document The AST document (currently unused but kept for consistency with other functions)
+ * @return Newly allocated HTML with ARIA attributes injected (must be freed)
+ */
+char *apex_apply_aria_labels(const char *html, cmark_node *document) {
+    (void)document;  /* Currently unused, but kept for API consistency */
+
+    if (!html) return NULL;
+
+    size_t html_len = strlen(html);
+    /* Allocate buffer with extra space for ARIA attributes */
+    size_t capacity = html_len + 2048;  /* Extra space for ARIA attributes */
+    char *output = malloc(capacity + 1);
+    if (!output) return strdup(html);
+
+    const char *read = html;
+    char *write = output;
+    size_t remaining = capacity;
+    int table_caption_counter = 0;
+
+    /* Helper macro to append strings safely */
+    #define APPEND_SAFE(str) do { \
+        size_t len = strlen(str); \
+        if (len <= remaining) { \
+            memcpy(write, str, len); \
+            write += len; \
+            remaining -= len; \
+        } \
+    } while(0)
+
+    /* Helper macro to copy characters safely */
+    #define COPY_CHAR(c) do { \
+        if (remaining > 0) { \
+            *write++ = (c); \
+            remaining--; \
+        } \
+    } while(0)
+
+    while (*read) {
+        /* Check for <nav class="toc"> */
+        if (*read == '<' && strncmp(read, "<nav", 4) == 0) {
+            const char *tag_start = read;
+            const char *tag_end = strchr(read, '>');
+            if (!tag_end) {
+                COPY_CHAR(*read++);
+                continue;
+            }
+
+            /* Check if this is a TOC nav element */
+            const char *class_attr = strstr(tag_start, "class=\"toc\"");
+            if (!class_attr) {
+                class_attr = strstr(tag_start, "class='toc'");
+            }
+
+            if (class_attr && class_attr < tag_end) {
+                /* Check if aria-label already exists */
+                const char *aria_label = strstr(tag_start, "aria-label=");
+                if (!aria_label || aria_label > tag_end) {
+                    /* Copy up to just before closing >, add aria-label, then close */
+                    size_t prefix_len = tag_end - tag_start;
+                    if (prefix_len <= remaining) {
+                        memcpy(write, tag_start, prefix_len);
+                        write += prefix_len;
+                        remaining -= prefix_len;
+                    }
+
+                    /* Add aria-label before closing > */
+                    APPEND_SAFE(" aria-label=\"Table of contents\"");
+                    COPY_CHAR('>');
+                    read = tag_end + 1;
+                    continue;
+                }
+            }
+        }
+
+        /* Check for <figure> */
+        if (*read == '<' && strncmp(read, "<figure", 7) == 0) {
+            const char *tag_start = read;
+            const char *tag_end = strchr(read, '>');
+            if (!tag_end) {
+                COPY_CHAR(*read++);
+                continue;
+            }
+
+            /* Check if role already exists */
+            const char *role_attr = strstr(tag_start, "role=");
+            if (!role_attr || role_attr > tag_end) {
+                /* Copy up to just before closing >, add role, then close */
+                size_t prefix_len = tag_end - tag_start;
+                if (prefix_len <= remaining) {
+                    memcpy(write, tag_start, prefix_len);
+                    write += prefix_len;
+                    remaining -= prefix_len;
+                }
+
+                /* Add role="figure" before closing > */
+                APPEND_SAFE(" role=\"figure\"");
+                COPY_CHAR('>');
+                read = tag_end + 1;
+                continue;
+            }
+        }
+
+        /* Check for <table> */
+        if (*read == '<' && strncmp(read, "<table", 6) == 0) {
+            const char *tag_start = read;
+            const char *tag_end = strchr(read, '>');
+            if (!tag_end) {
+                COPY_CHAR(*read++);
+                continue;
+            }
+
+            /* Check if role already exists */
+            const char *role_attr = strstr(tag_start, "role=");
+            bool needs_role = (!role_attr || role_attr > tag_end);
+
+            /* Check if aria-describedby already exists */
+            const char *aria_desc = strstr(tag_start, "aria-describedby=");
+            bool has_aria_desc = (aria_desc && aria_desc < tag_end);
+
+            /* Check if we're in a table-figure context and look for figcaption */
+            bool in_table_figure = false;
+            const char *before_table = read - 1;
+            while (before_table >= html && before_table > read - 500) {
+                if (*before_table == '<' && strncmp(before_table, "<figure", 7) == 0) {
+                    const char *class_check = strstr(before_table, "class=\"table-figure\"");
+                    if (!class_check) {
+                        class_check = strstr(before_table, "class='table-figure'");
+                    }
+                    if (class_check && class_check < tag_start) {
+                        in_table_figure = true;
+                        break;
+                    }
+                }
+                before_table--;
+            }
+
+            /* Look backwards for figcaption ID in the same figure */
+            char *caption_id = NULL;
+            if (in_table_figure && !has_aria_desc) {
+                const char *search = read - 1;
+                while (search >= html && search > read - 2000) {
+                    if (*search == '<' && strncmp(search, "<figcaption", 11) == 0) {
+                        const char *cap_tag_end = strchr(search, '>');
+                        if (cap_tag_end && cap_tag_end < tag_start) {
+                            /* Found a figcaption before this table */
+                            const char *id_attr = strstr(search, "id=\"");
+                            if (!id_attr) {
+                                id_attr = strstr(search, "id='");
+                            }
+                            if (id_attr && id_attr < cap_tag_end) {
+                                /* Extract ID */
+                                const char *id_start = id_attr + 4;
+                                const char *id_end = strchr(id_start, '"');
+                                if (!id_end) id_end = strchr(id_start, '\'');
+                                if (id_end && id_end > id_start) {
+                                    size_t id_len = id_end - id_start;
+                                    caption_id = malloc(id_len + 1);
+                                    if (caption_id) {
+                                        memcpy(caption_id, id_start, id_len);
+                                        caption_id[id_len] = '\0';
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    search--;
+                }
+            }
+
+            if (needs_role || caption_id) {
+                /* Copy up to just before closing >, add attributes, then close */
+                size_t prefix_len = tag_end - tag_start;
+                if (prefix_len <= remaining) {
+                    memcpy(write, tag_start, prefix_len);
+                    write += prefix_len;
+                    remaining -= prefix_len;
+                }
+
+                /* Add role="table" if needed */
+                if (needs_role) {
+                    APPEND_SAFE(" role=\"table\"");
+                }
+
+                /* Add aria-describedby if we found a caption ID */
+                if (caption_id) {
+                    char aria_desc_str[256];
+                    snprintf(aria_desc_str, sizeof(aria_desc_str), " aria-describedby=\"%s\"", caption_id);
+                    APPEND_SAFE(aria_desc_str);
+                    free(caption_id);
+                }
+
+                COPY_CHAR('>');
+                read = tag_end + 1;
+                continue;
+            }
+        }
+
+        /* Check for <figcaption> within table-figure to add IDs if missing */
+        if (*read == '<' && strncmp(read, "<figcaption", 11) == 0) {
+            const char *tag_start = read;
+            const char *tag_end = strchr(read, '>');
+            if (!tag_end) {
+                COPY_CHAR(*read++);
+                continue;
+            }
+
+            /* Check if we're in a table-figure context by looking backwards */
+            const char *before_cap = read - 1;
+            bool in_table_figure = false;
+            while (before_cap >= html && before_cap > read - 200) {
+                if (*before_cap == '<' && strncmp(before_cap, "<figure", 7) == 0) {
+                    const char *class_check = strstr(before_cap, "class=\"table-figure\"");
+                    if (!class_check) {
+                        class_check = strstr(before_cap, "class='table-figure'");
+                    }
+                    if (class_check && class_check < tag_start) {
+                        in_table_figure = true;
+                        break;
+                    }
+                }
+                before_cap--;
+            }
+
+            if (in_table_figure) {
+                /* Check if ID already exists */
+                const char *id_attr = strstr(tag_start, "id=\"");
+                if (!id_attr) {
+                    id_attr = strstr(tag_start, "id='");
+                }
+
+                if (!id_attr || id_attr > tag_end) {
+                    /* No ID, generate one */
+                    char caption_id[64];
+                    table_caption_counter++;
+                    snprintf(caption_id, sizeof(caption_id), "table-caption-%d", table_caption_counter);
+
+                    /* Copy up to just before closing >, add id, then close */
+                    size_t prefix_len = tag_end - tag_start;
+                    if (prefix_len <= remaining) {
+                        memcpy(write, tag_start, prefix_len);
+                        write += prefix_len;
+                        remaining -= prefix_len;
+                    }
+
+                    /* Add id attribute */
+                    char id_attr_str[128];
+                    snprintf(id_attr_str, sizeof(id_attr_str), " id=\"%s\"", caption_id);
+                    APPEND_SAFE(id_attr_str);
+                    COPY_CHAR('>');
+                    read = tag_end + 1;
+                    continue;
+                }
+            }
+        }
+
+        /* Default: copy character */
+        COPY_CHAR(*read++);
+    }
+
+    #undef APPEND_SAFE
+    #undef COPY_CHAR
+
+    *write = '\0';
+    return output;
+}
+

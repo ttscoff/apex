@@ -50,6 +50,16 @@ If no file is specified, **apex** reads from stdin.
 **--pretty**
 :   Pretty-print HTML with indentation and whitespace.
 
+**--aria**
+:   Add ARIA labels and accessibility attributes to HTML output. When enabled, adds:
+    - `aria-label="Table of contents"` to TOC navigation elements (`<nav class="toc">`)
+    - `role="figure"` to `<figure>` elements
+    - `role="table"` to `<table>` elements
+    - `id` attributes to `<figcaption>` elements within table figures (if missing)
+    - `aria-describedby` attributes to tables linking them to their captions
+
+    This enhances screen reader support and makes the HTML output more accessible. Default: disabled.
+
 ## Feature Flags
 
 **--accept**

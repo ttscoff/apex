@@ -1189,6 +1189,19 @@ static void test_advanced_tables(void) {
     assert_contains(html, "<td>C1</td>", "Table cell");
     apex_free_string(html);
 
+    /* Test row header column when first header cell is empty */
+    const char *row_header_table =
+        "|   | H1 | H2 |\n"
+        "|----|----|----|\n"
+        "| Row 1 | A1 | B1 |\n"
+        "| Row 2 | A2 | B2 |";
+    html = apex_markdown_to_html(row_header_table, strlen(row_header_table), &opts);
+    assert_contains(html, "<table>", "Row-header table renders");
+    assert_contains(html, "<th scope=\"row\">Row 1</th>", "Row-header table: first row header cell");
+    assert_contains(html, "<th scope=\"row\">Row 2</th>", "Row-header table: second row header cell");
+    assert_contains(html, "<td>A1</td>", "Row-header table: body cell A1");
+    apex_free_string(html);
+
     /* Test table followed by paragraph (regression: last row should not become paragraph) */
     const char *table_with_text = "| H1 | H2 |\n|-----|-----|\n| C1 | C2 |\n| C3 | C4 |\n\nText after.";
     html = apex_markdown_to_html(table_with_text, strlen(table_with_text), &opts);
@@ -3745,6 +3758,111 @@ static void test_metadata_control_options(void) {
 }
 
 /**
+ * Test ARIA labels and accessibility attributes
+ */
+static void test_aria_labels(void) {
+    printf("\n=== ARIA Labels Tests ===\n");
+
+    apex_options opts = apex_options_default();
+    char *html;
+
+    /* Test 1: TOC nav gets aria-label when --aria is enabled */
+    opts.enable_aria = true;
+    opts.enable_marked_extensions = true;
+    const char *doc_with_toc = "# Header 1\n\n<!--TOC-->\n\n## Header 2";
+    html = apex_markdown_to_html(doc_with_toc, strlen(doc_with_toc), &opts);
+    assert_contains(html, "<nav class=\"toc\"", "TOC nav element present");
+    assert_contains(html, "aria-label=\"Table of contents\"", "TOC nav has aria-label");
+    apex_free_string(html);
+
+    /* Test 2: TOC nav does NOT get aria-label when --aria is disabled (backward compatibility) */
+    opts.enable_aria = false;
+    html = apex_markdown_to_html(doc_with_toc, strlen(doc_with_toc), &opts);
+    assert_contains(html, "<nav class=\"toc\"", "TOC nav element present");
+    assert_not_contains(html, "aria-label=\"Table of contents\"", "TOC nav without aria-label when disabled");
+    apex_free_string(html);
+
+    /* Test 3: Figures get role="figure" when --aria is enabled */
+    opts.enable_aria = true;
+    opts.enable_tables = true;
+    /* Use a table with caption to generate a figure */
+    const char *table_with_caption = "[Test Table Caption]\n| A | B |\n|---|---|\n| 1 | 2 |";
+    html = apex_markdown_to_html(table_with_caption, strlen(table_with_caption), &opts);
+    assert_contains(html, "<figure", "Figure element present");
+    assert_contains(html, "role=\"figure\"", "Figure has role attribute");
+    apex_free_string(html);
+
+    /* Test 4: Figures do NOT get role when --aria is disabled */
+    opts.enable_aria = false;
+    html = apex_markdown_to_html(table_with_caption, strlen(table_with_caption), &opts);
+    assert_contains(html, "<figure", "Figure element present");
+    assert_not_contains(html, "role=\"figure\"", "Figure without role when disabled");
+    apex_free_string(html);
+
+    /* Test 5: Tables get role="table" when --aria is enabled */
+    opts.enable_aria = true;
+    const char *simple_table = "| A | B |\n|---|---|\n| 1 | 2 |";
+    html = apex_markdown_to_html(simple_table, strlen(simple_table), &opts);
+    assert_contains(html, "<table", "Table element present");
+    assert_contains(html, "role=\"table\"", "Table has role attribute");
+    apex_free_string(html);
+
+    /* Test 6: Tables do NOT get role when --aria is disabled */
+    opts.enable_aria = false;
+    html = apex_markdown_to_html(simple_table, strlen(simple_table), &opts);
+    assert_contains(html, "<table", "Table element present");
+    assert_not_contains(html, "role=\"table\"", "Table without role when disabled");
+    apex_free_string(html);
+
+    /* Test 7: Table figures with captions get IDs on figcaption when --aria is enabled */
+    opts.enable_aria = true;
+    html = apex_markdown_to_html(table_with_caption, strlen(table_with_caption), &opts);
+    assert_contains(html, "<figcaption", "Figcaption element present");
+    assert_contains(html, "id=\"table-caption-1\"", "Figcaption has generated ID");
+    apex_free_string(html);
+
+    /* Test 8: Tables with captions get aria-describedby linking to figcaption when --aria is enabled */
+    opts.enable_aria = true;
+    html = apex_markdown_to_html(table_with_caption, strlen(table_with_caption), &opts);
+    assert_contains(html, "<table", "Table element present");
+    assert_contains(html, "aria-describedby=\"table-caption-1\"", "Table has aria-describedby linking to caption");
+    apex_free_string(html);
+
+    /* Test 9: Multiple tables with captions get unique IDs */
+    opts.enable_aria = true;
+    const char *multiple_tables =
+        "[First Table]\n| A |\n|---|\n| 1 |\n\n"
+        "[Second Table]\n| B |\n|---|\n| 2 |";
+    html = apex_markdown_to_html(multiple_tables, strlen(multiple_tables), &opts);
+    assert_contains(html, "id=\"table-caption-1\"", "First figcaption has ID 1");
+    assert_contains(html, "id=\"table-caption-2\"", "Second figcaption has ID 2");
+    assert_contains(html, "aria-describedby=\"table-caption-1\"", "First table links to caption 1");
+    assert_contains(html, "aria-describedby=\"table-caption-2\"", "Second table links to caption 2");
+    apex_free_string(html);
+
+    /* Test 10: Tables with existing figcaption IDs use them for aria-describedby */
+    opts.enable_aria = true;
+    /* Create a table with a manually set ID on the caption using IAL */
+    const char *table_with_manual_id =
+        "[Custom Caption]{#my-custom-id}\n"
+        "| A |\n"
+        "|---|\n"
+        "| 1 |";
+    html = apex_markdown_to_html(table_with_manual_id, strlen(table_with_manual_id), &opts);
+    assert_contains(html, "id=\"my-custom-id\"", "Manual ID preserved on figcaption");
+    assert_contains(html, "aria-describedby=\"my-custom-id\"", "Table links to manual ID");
+    apex_free_string(html);
+
+    /* Test 11: TOC with MMD style also gets aria-label */
+    opts.enable_aria = true;
+    const char *mmd_toc_doc = "# Title\n\n{{TOC}}\n\n## Section";
+    html = apex_markdown_to_html(mmd_toc_doc, strlen(mmd_toc_doc), &opts);
+    assert_contains(html, "<nav class=\"toc\"", "MMD TOC nav present");
+    assert_contains(html, "aria-label=\"Table of contents\"", "MMD TOC nav has aria-label");
+    apex_free_string(html);
+}
+
+/**
  * Main test runner
  */
 int main(int argc, char *argv[]) {
@@ -3798,6 +3916,7 @@ int main(int argc, char *argv[]) {
     test_image_embedding();
     test_indices();
     test_citations();
+    test_aria_labels();
 
     /* Print results */
     printf("\n==========================================\n");

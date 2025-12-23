@@ -1808,6 +1808,9 @@ apex_options apex_options_default(void) {
     /* Stylesheet embedding options */
     opts.embed_stylesheet = false;
 
+    /* ARIA accessibility options */
+    opts.enable_aria = false;
+
     /* Source file information (used by plugins via APEX_FILE_PATH) */
     opts.input_file_path = NULL;
 
@@ -2770,6 +2773,17 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         if (with_toc) {
             free(html);
             html = with_toc;
+        }
+    }
+
+    /* Apply ARIA labels if enabled */
+    if (options->enable_aria && html) {
+        PROFILE_START(aria_labels);
+        char *aria_html = apex_apply_aria_labels(html, document);
+        PROFILE_END(aria_labels);
+        if (aria_html && aria_html != html) {
+            free(html);
+            html = aria_html;
         }
     }
 

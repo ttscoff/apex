@@ -551,6 +551,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     bool in_row = false;
     bool in_tbody = false;  /* Track if we're currently in tbody */
     bool in_tfoot = false;  /* Track if we're currently in tfoot */
+    bool in_thead = false;  /* Track if we're currently in thead */
     bool current_row_is_tfoot = false;  /* Track if current row is a tfoot row */
 
     /* Pre-calculated mapping for current row: HTML position -> original column index */
@@ -562,6 +563,11 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
      * being rowspanned in that column. When we see a ^^ cell, we increment its rowspan. */
     cell_attr *active_rowspan_cells[50];  /* One per column */
     for (int i = 0; i < 50; i++) active_rowspan_cells[i] = NULL;
+
+    /* Track tables that have an explicit row-header first column.
+     * Detected when the first header row's first cell is empty (|   | Header ...). */
+    bool table_has_row_header_first_col[50];
+    for (int i = 0; i < 50; i++) table_has_row_header_first_col[i] = false;
 
     /* Track the previous cell's matching status to check for colspan */
     cell_attr *prev_cell_matching = NULL;
@@ -581,6 +587,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             in_table = true;
             table_idx++; /* New table */
             row_idx = -1; /* Reset for each new table */
+            in_thead = false;
 
             /* Check if this table has a caption (before fixing spacing so we can add figure tag) */
             table_caption *cap = NULL;
@@ -877,6 +884,10 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             }
 
             in_table = false;
+        } else if (in_table && strncmp(read, "<thead>", 7) == 0) {
+            in_thead = true;
+        } else if (in_table && strncmp(read, "</thead>", 8) == 0) {
+            in_thead = false;
         } else if (in_table && strncmp(read, "<tbody>", 7) == 0) {
             /* We're entering tbody - mark it */
             in_tbody = true;
@@ -1524,6 +1535,24 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                 }
             }
 
+            /* Detect header row with empty first cell to enable row-header column.
+             * We only consider the first header row's first cell (<thead>, row_idx == 0, col_idx == 0). */
+            if (in_table && !in_tbody && !in_tfoot && in_thead &&
+                table_idx >= 0 && table_idx < 50 &&
+                row_idx == 0 && col_idx == 0 && is_th) {
+                bool header_first_cell_empty = true;
+                size_t plen = strlen(cell_preview);
+                for (size_t i = 0; i < plen; i++) {
+                    if (!isspace((unsigned char)cell_preview[i])) {
+                        header_first_cell_empty = false;
+                        break;
+                    }
+                }
+                if (header_first_cell_empty) {
+                    table_has_row_header_first_col[table_idx] = true;
+                }
+            }
+
             /* Use pre-calculated mapping: HTML position -> original column index */
             int target_original_col = -1;
             if (col_idx < row_col_mapping_size) {
@@ -1811,7 +1840,72 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                 continue;
             }
 
-            /* Process cell alignment (check for leading/trailing colons) for cells without spans */
+            /* Convert first-column body cells to row headers when the header
+             * row's first cell was empty (|   | Header ...).
+             * We emit <th scope="row"> for those cells before any alignment processing. */
+            bool make_row_header = false;
+            if (!is_th &&
+                in_tbody &&
+                in_row &&
+                table_idx >= 0 && table_idx < 50 &&
+                table_has_row_header_first_col[table_idx] &&
+                col_idx == 0) {
+                make_row_header = true;
+            }
+
+            if (make_row_header) {
+                const char *tag_end = strchr(read, '>');
+                if (tag_end) {
+                    const char *cell_content_start = tag_end + 1;
+                    const char *close_tag_td = strstr(cell_content_start, "</td>");
+                    const char *close_tag_th = strstr(cell_content_start, "</th>");
+                    const char *cell_content_end = NULL;
+                    const char *orig_close = NULL;
+
+                    if (close_tag_td && (!close_tag_th || close_tag_td < close_tag_th)) {
+                        cell_content_end = close_tag_td;
+                        orig_close = close_tag_td;
+                    } else if (close_tag_th) {
+                        cell_content_end = close_tag_th;
+                        orig_close = close_tag_th;
+                    }
+
+                    if (cell_content_end) {
+                        /* Write <th scope="row"> */
+                        const char *th_open = "<th scope=\"row\">";
+                        size_t th_open_len = strlen(th_open);
+                        memcpy(write, th_open, th_open_len);
+                        write += th_open_len;
+                        written += th_open_len;
+
+                        /* Copy original cell content */
+                        const char *p = cell_content_start;
+                        while (p < cell_content_end) {
+                            *write++ = *p++;
+                            written++;
+                        }
+
+                        /* Write closing </th> */
+                        const char *th_close = "</th>";
+                        size_t th_close_len = strlen(th_close);
+                        memcpy(write, th_close, th_close_len);
+                        write += th_close_len;
+                        written += th_close_len;
+
+                        /* Advance read pointer past original closing tag */
+                        read = orig_close;
+                        if (strncmp(read, "</td>", 5) == 0 || strncmp(read, "</th>", 5) == 0) {
+                            read += 5;
+                        }
+
+                        col_idx++;
+                        prev_cell_matching = matching;
+                        continue;
+                    }
+                }
+            }
+
+            /* Process cell alignment (check for leading/trailing colons) for cells without spans or row-header conversion */
             const char *cell_content_start = strchr(read, '>');
             if (cell_content_start) {
                 cell_content_start++;  /* Move past '>' */

@@ -140,6 +140,9 @@ typedef struct {
      */
     bool embed_stylesheet;
 
+    /* ARIA accessibility options */
+    bool enable_aria;  /* Add ARIA labels and accessibility attributes to HTML output */
+
     /* Source file information for plugins */
     /* When Apex is invoked on a file, this is the full path to that file. */
     /* When reading from stdin, this is either the base directory (if set) or empty. */

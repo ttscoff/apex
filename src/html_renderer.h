@@ -94,6 +94,16 @@ char *apex_adjust_header_levels(const char *html, int base_header_level);
  */
 char *apex_adjust_quote_language(const char *html, const char *quotes_language);
 
+/**
+ * Apply ARIA labels and accessibility attributes to HTML output
+ * Adds aria-label to TOC nav elements, role attributes to figures and tables,
+ * and aria-describedby linking tables to their captions
+ * @param html The HTML to process
+ * @param document The AST document (currently unused but kept for API consistency)
+ * @return Newly allocated HTML with ARIA attributes injected (must be freed)
+ */
+char *apex_apply_aria_labels(const char *html, cmark_node *document);
+
 #ifdef __cplusplus
 }
 #endif
