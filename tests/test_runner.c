@@ -1056,6 +1056,31 @@ static void test_ial(void) {
     assert_not_contains(html, "{:.special}", "IAL removed from output");
     apex_free_string(html);
 
+    /* Test Pandoc-style IAL (no colon) for block-level elements */
+    html = apex_markdown_to_html("# Header\n{#pandoc-id .pandoc-class}", 35, &opts);
+    assert_contains(html, "id=\"pandoc-id\"", "Pandoc-style block IAL ID");
+    assert_contains(html, "class=\"pandoc-class\"", "Pandoc-style block IAL class");
+    apex_free_string(html);
+
+    /* Test Pandoc-style IAL for paragraphs */
+    html = apex_markdown_to_html("Paragraph text\n\n{#para-id .para-class}", 40, &opts);
+    assert_contains(html, "id=\"para-id\"", "Pandoc-style paragraph IAL ID");
+    assert_contains(html, "class=\"para-class\"", "Pandoc-style paragraph IAL class");
+    apex_free_string(html);
+
+    /* Test Pandoc-style IAL for inline elements */
+    const char *pandoc_inline = "Here's a [link](url){#link-id .link-class} with Pandoc IAL.";
+    html = apex_markdown_to_html(pandoc_inline, strlen(pandoc_inline), &opts);
+    assert_contains(html, "id=\"link-id\"", "Pandoc-style inline IAL ID");
+    assert_contains(html, "class=\"link-class\"", "Pandoc-style inline IAL class");
+    apex_free_string(html);
+
+    /* Test Pandoc-style IAL with multiple classes */
+    html = apex_markdown_to_html("## Heading\n{#heading-id .class1 .class2}", 40, &opts);
+    assert_contains(html, "id=\"heading-id\"", "Pandoc-style IAL with multiple classes - ID");
+    assert_contains(html, "class=\"class1 class2\"", "Pandoc-style IAL with multiple classes");
+    apex_free_string(html);
+
     /* Test inline IAL on strong/emph */
     html = apex_markdown_to_html("This is **bold**{:.bold-style} text.", 40, &opts);
     assert_contains(html, "class=\"bold-style\"", "Inline IAL on strong");
@@ -1205,7 +1230,7 @@ static void test_advanced_tables(void) {
     const char *caption_table = "[Table Caption]\n\n| H1 | H2 |\n|----|----|"
                                 "\n| C1 | C2 |";
     html = apex_markdown_to_html(caption_table, strlen(caption_table), &opts);
-    assert_contains(html, "<table>", "Caption table renders");
+    assert_contains(html, "<table", "Caption table renders");
     assert_contains(html, "<figure", "Caption table wrapped in figure");
     assert_contains(html, "<figcaption>", "Caption has figcaption tag");
     assert_contains(html, "Table Caption", "Caption text is present");
@@ -1216,7 +1241,7 @@ static void test_advanced_tables(void) {
     const char *caption_table_after = "| H1 | H2 |\n|----|----|"
                                      "\n| C1 | C2 |\n\n[Table Caption After]";
     html = apex_markdown_to_html(caption_table_after, strlen(caption_table_after), &opts);
-    assert_contains(html, "<table>", "Caption table after renders");
+    assert_contains(html, "<table", "Caption table after renders");
     assert_contains(html, "<figure", "Caption table after wrapped in figure");
     assert_contains(html, "Table Caption After", "Caption text after is present");
     apex_free_string(html);
@@ -1277,6 +1302,49 @@ static void test_advanced_tables(void) {
     assert_contains(html, "<td>C3</td>", "Last table row C3 in table");
     assert_contains(html, "<td>C4</td>", "Last table row C4 in table");
     assert_contains(html, "</table>\n<p>Text after.</p>", "Table properly closed before paragraph");
+    apex_free_string(html);
+
+    /* Test Pandoc-style table caption with : Caption syntax */
+    const char *pandoc_caption = "| Key | Value |\n| --- | :---: |\n| one |   1   |\n| two |   2   |\n\n: Key value table";
+    html = apex_markdown_to_html(pandoc_caption, strlen(pandoc_caption), &opts);
+    assert_contains(html, "<figcaption>", "Pandoc caption has figcaption tag");
+    assert_contains(html, "Key value table", "Pandoc caption text is present");
+    assert_contains(html, "<table", "Table with Pandoc caption renders");
+    apex_free_string(html);
+
+    /* Test Pandoc-style table caption with IAL attributes (Kramdown format) */
+    const char *pandoc_caption_ial_kramdown = "| Key | Value |\n| --- | :---: |\n| one |   1   |\n| two |   2   |\n\n: Key value table {: #table-id .testing}";
+    html = apex_markdown_to_html(pandoc_caption_ial_kramdown, strlen(pandoc_caption_ial_kramdown), &opts);
+    assert_contains(html, "<table", "Table with Pandoc caption and IAL renders");
+    assert_contains(html, "id=\"table-id\"", "Table IAL ID from caption applied");
+    assert_contains(html, "class=\"testing\"", "Table IAL class from caption applied");
+    assert_contains(html, "Key value table", "Caption text is present");
+    apex_free_string(html);
+
+    /* Test Pandoc-style table caption with IAL attributes (Pandoc format) */
+    const char *pandoc_caption_ial_pandoc = "| Key | Value |\n| --- | :---: |\n| one |   1   |\n| two |   2   |\n\n: Key value table {#table-id-2 .testing-2}";
+    html = apex_markdown_to_html(pandoc_caption_ial_pandoc, strlen(pandoc_caption_ial_pandoc), &opts);
+    assert_contains(html, "<table", "Table with Pandoc caption and Pandoc IAL renders");
+    assert_contains(html, "id=\"table-id-2\"", "Table Pandoc IAL ID from caption applied");
+    assert_contains(html, "class=\"testing-2\"", "Table Pandoc IAL class from caption applied");
+    assert_contains(html, "Key value table", "Caption text is present");
+    apex_free_string(html);
+
+    /* Test table with IAL applied directly (not via caption) */
+    const char *table_with_direct_ial = "| H1 | H2 |\n|----|----|\n| C1 | C2 |\n{: #direct-table .direct-class}";
+    html = apex_markdown_to_html(table_with_direct_ial, strlen(table_with_direct_ial), &opts);
+    assert_contains(html, "<table", "Table with direct IAL renders");
+    assert_contains(html, "id=\"direct-table\"", "Direct table IAL ID applied");
+    assert_contains(html, "class=\"direct-class\"", "Direct table IAL class applied");
+    apex_free_string(html);
+
+    /* Test table caption before table with IAL */
+    const char *caption_before_ial = "[Caption Before]\n\n| H1 | H2 |\n|----|----|\n| C1 | C2 |\n{: #before-table .before-class}";
+    html = apex_markdown_to_html(caption_before_ial, strlen(caption_before_ial), &opts);
+    assert_contains(html, "<table", "Table with caption before and IAL renders");
+    assert_contains(html, "Caption Before", "Caption text before table");
+    assert_contains(html, "id=\"before-table\"", "Table IAL ID with caption before");
+    assert_contains(html, "class=\"before-class\"", "Table IAL class with caption before");
     apex_free_string(html);
 }
 

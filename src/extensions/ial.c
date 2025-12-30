@@ -634,7 +634,7 @@ static bool extract_ial_from_paragraph(cmark_node *para, apex_attributes **attrs
     /* Check nothing after } except whitespace */
     const char *after = close + 1;
     while (*after && isspace((unsigned char)*after)) after++;
-    if (*after != '\0') return false;
+    if (*after != '\0' && *after != '\n') return false;
 
     /* This is a pure IAL paragraph - extract attributes */
     return extract_ial_from_text(text, attrs_out, alds);
@@ -676,26 +676,53 @@ static bool process_span_ial_in_container(cmark_node *container, ald_entry *alds
             continue;
         }
 
-        /* Look for IAL pattern: {: ... } or {#id .class} at the start (after optional whitespace) */
+        /* Look for IAL pattern: {: ... } or {#id .class} at the start (after optional whitespace) or at the end */
         const char *text_ptr = text;
+        const char *ial_start = NULL;
+        char second_char = 0;
 
-        /* Skip leading whitespace */
-        while (*text_ptr && isspace((unsigned char)*text_ptr)) {
-            text_ptr++;
+        /* First, try at the start (after optional whitespace) */
+        const char *start_ptr = text;
+        while (*start_ptr && isspace((unsigned char)*start_ptr)) {
+            start_ptr++;
         }
 
-        /* Check if it starts with {: or {# or {. */
-        if (text_ptr[0] != '{') {
+        if (start_ptr[0] == '{') {
+            char sc = start_ptr[1];
+            if (sc == ':' || sc == '#' || sc == '.') {
+                ial_start = start_ptr;
+                text_ptr = start_ptr;
+                second_char = sc;
+            }
+        }
+
+        /* If not found at start, try at the end (for inline IALs after elements) */
+        if (!ial_start) {
+            const char *end_ptr = strrchr(text, '{');
+            if (end_ptr) {
+                char sc = end_ptr[1];
+                if (sc == ':' || sc == '#' || sc == '.') {
+                    /* Check if this is at the end (only whitespace after closing brace) */
+                    const char *close = strchr(end_ptr, '}');
+                    if (close) {
+                        const char *after = close + 1;
+                        while (*after && isspace((unsigned char)*after)) after++;
+                        if (!*after) {
+                            /* IAL is at the end of the text node */
+                            ial_start = end_ptr;
+                            text_ptr = text; /* Keep original text_ptr for prefix calculation */
+                            second_char = sc;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!ial_start) {
             child = next;
             continue;
         }
-        char second_char = text_ptr[1];
-        if (second_char != ':' && second_char != '#' && second_char != '.') {
-            child = next;
-            continue;
-        }
 
-        const char *ial_start = text_ptr;
         const char *close = strchr(ial_start, '}');
         if (!close) {
             child = next;
@@ -863,8 +890,15 @@ static bool process_span_ial_in_container(cmark_node *container, ald_entry *alds
         cmark_node_set_user_data(target, attr_str);
         apex_free_attributes(attrs);
 
-        /* Remove the IAL from the text node, preserving any text after it */
-        size_t prefix_len = text_ptr - text;  /* Text before IAL (whitespace) */
+        /* Remove the IAL from the text node, preserving any text before/after it */
+        size_t prefix_len;
+        if (ial_start == start_ptr) {
+            /* IAL was at the start - prefix is just whitespace before IAL */
+            prefix_len = text_ptr - text;
+        } else {
+            /* IAL was at the end - prefix is everything before the IAL */
+            prefix_len = ial_start - text;
+        }
         const char *suffix = close + 1;  /* Text after IAL closing brace */
 
         /* Build new text: prefix (if any) + suffix (if any) */
@@ -958,9 +992,11 @@ static bool extract_ial_from_heading(cmark_node *heading, apex_attributes **attr
     const char *text = cmark_node_get_literal(text_node);
     if (!text) return false;
 
-    /* Look for {: at the end */
+    /* Look for { at the end - support both {: and {# or {. formats */
     const char *ial_start = strrchr(text, '{');
-    if (!ial_start || ial_start[1] != ':') return false;
+    if (!ial_start) return false;
+    char second_char = ial_start[1];
+    if (second_char != ':' && second_char != '#' && second_char != '.') return false;
 
     /* Find closing } */
     const char *close = strchr(ial_start, '}');
@@ -1005,29 +1041,63 @@ static bool extract_ial_from_heading(cmark_node *heading, apex_attributes **attr
  * Check if a paragraph is ONLY an IAL (should be removed entirely)
  */
 static bool is_pure_ial_paragraph(cmark_node *para) {
-    if (cmark_node_get_type(para) != CMARK_NODE_PARAGRAPH) return false;
+    if (cmark_node_get_type(para) != CMARK_NODE_PARAGRAPH) {
+        return false;
+    }
 
     cmark_node *text_node = cmark_node_first_child(para);
-    if (!text_node || cmark_node_get_type(text_node) != CMARK_NODE_TEXT) return false;
-    if (cmark_node_next(text_node) != NULL) return false;
+    if (!text_node) {
+        return false;
+    }
+    if (cmark_node_get_type(text_node) != CMARK_NODE_TEXT) {
+        return false;
+    }
+    if (cmark_node_next(text_node) != NULL) {
+        return false;
+    }
 
     const char *text = cmark_node_get_literal(text_node);
-    if (!text) return false;
+    if (!text) {
+        return false;
+    }
 
-    /* Trim */
+    /* Trim leading whitespace */
     while (isspace((unsigned char)*text)) text++;
 
-    /* Check if it's ONLY {: ... } */
-    if (text[0] != '{' || text[1] != ':') return false;
+    /* Find end of text, trimming trailing whitespace including newlines */
+    const char *text_end = text + strlen(text);
+    while (text_end > text && isspace((unsigned char)*(text_end - 1))) {
+        text_end--;
+    }
+    size_t text_len = text_end - text;
 
-    const char *close = strchr(text + 2, '}');
-    if (!close) return false;
+    /* Check if it's ONLY {: ... } or {#id .class} */
+    if (text_len == 0 || text[0] != '{') return false;
+    if (text_len < 2) return false;
+    char second_char = text[1];
+    if (second_char != ':' && second_char != '#' && second_char != '.') {
+        return false;
+    }
 
-    /* Check nothing after */
+    /* For {: format, skip {: (2 chars); for {# or {. format, skip { (1 char) */
+    const char *search_start = (second_char == ':') ? text + 2 : text + 1;
+    if (search_start >= text_end) {
+        return false;
+    }
+    const char *close = strchr(search_start, '}');
+    if (!close) {
+        return false;
+    }
+    if (close >= text_end) {
+        return false;
+    }
+
+    /* Check nothing after the closing brace (should be at end of trimmed text) */
     const char *after = close + 1;
-    while (*after && isspace((unsigned char)*after)) after++;
-
-    return (*after == '\0');
+    while (after < text_end && isspace((unsigned char)*after)) {
+        after++;
+    }
+    return (after >= text_end);
 }
 
 /**

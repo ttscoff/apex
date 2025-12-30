@@ -2678,7 +2678,10 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     /* Process IAL (Inline Attribute Lists) if in Kramdown or Unified mode */
     if (alds || options->mode == APEX_MODE_KRAMDOWN || options->mode == APEX_MODE_UNIFIED) {
         /* Fast path: skip AST walk if no IAL markers present */
-        if (strstr(text_ptr, "{:") != NULL) {
+        /* Check for both Kramdown-style ({:) and Pandoc-style ({# or {.) IALs */
+        if (strstr(text_ptr, "{:") != NULL ||
+            strstr(text_ptr, "{#") != NULL ||
+            strstr(text_ptr, "{.") != NULL) {
             PROFILE_START(ial);
             apex_process_ial_in_tree(document, alds);
             PROFILE_END(ial);
