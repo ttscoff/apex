@@ -54,6 +54,7 @@ typedef struct {
     bool enable_callouts;
     bool enable_marked_extensions;
     bool enable_divs;  /* Enable Pandoc fenced divs (Unified mode only) */
+    bool enable_spans;  /* Enable bracketed spans [text]{IAL} (Pandoc-style) */
 
     /* Critic markup mode */
     int critic_mode;  /* 0=markup (default), 1=accept, 2=reject */

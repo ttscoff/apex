@@ -2763,3 +2763,344 @@ void apex_apply_image_attributes(cmark_node *document, image_attr_entry *img_att
     cmark_iter_free(iter);
 }
 
+/**
+ * Extract reference link definition IDs from text
+ * Returns a hash set (simple array) of reference IDs
+ * Caller must free the returned array
+ */
+static char **extract_reference_link_ids(const char *text, size_t *count) {
+    if (!text || !count) return NULL;
+
+    *count = 0;
+    size_t capacity = 16;
+    char **ids = malloc(capacity * sizeof(char*));
+    if (!ids) return NULL;
+
+    const char *p = text;
+    while (*p) {
+        const char *line_start = p;
+        const char *line_end = strchr(p, '\n');
+        if (!line_end) line_end = p + strlen(p);
+
+        /* Skip leading whitespace */
+        const char *content_start = line_start;
+        while (content_start < line_end && (*content_start == ' ' || *content_start == '\t')) {
+            content_start++;
+        }
+
+        /* Check if this is a reference link definition: [id]: URL */
+        if (content_start < line_end && *content_start == '[') {
+            const char *id_end = strchr(content_start + 1, ']');
+            if (id_end && id_end < line_end && id_end[1] == ':') {
+                /* Extract the ID from this definition */
+                size_t def_id_len = id_end - (content_start + 1);
+                if (def_id_len > 0) {
+                    char *def_id = malloc(def_id_len + 1);
+                    if (def_id) {
+                        memcpy(def_id, content_start + 1, def_id_len);
+                        def_id[def_id_len] = '\0';
+
+                        /* Check if we already have this ID */
+                        bool found = false;
+                        for (size_t i = 0; i < *count; i++) {
+                            if (strcmp(ids[i], def_id) == 0) {
+                                found = true;
+                                free(def_id);
+                                break;
+                            }
+                        }
+
+                        if (!found) {
+                            /* Add to array */
+                            if (*count >= capacity) {
+                                capacity *= 2;
+                                char **new_ids = realloc(ids, capacity * sizeof(char*));
+                                if (!new_ids) {
+                                    free(def_id);
+                                    break;
+                                }
+                                ids = new_ids;
+                            }
+                            ids[*count] = def_id;
+                            (*count)++;
+                        }
+                    }
+                }
+            }
+        }
+
+        p = (*line_end == '\n') ? line_end + 1 : line_end;
+    }
+
+    return ids;
+}
+
+/**
+ * Check if a reference ID matches the given text (case-insensitive, whitespace normalized)
+ */
+static bool reference_id_matches(const char *ref_id, const char *text, size_t text_len) {
+    if (!ref_id || !text) return false;
+
+    const char *p = ref_id;
+    const char *t = text;
+    size_t remaining = text_len;
+
+    /* Skip leading whitespace in both */
+    while (*p && isspace((unsigned char)*p)) p++;
+    while (remaining > 0 && isspace((unsigned char)*t)) {
+        t++;
+        remaining--;
+    }
+
+    /* Compare character by character (case-insensitive) */
+    while (*p && remaining > 0) {
+        if (tolower((unsigned char)*p) != tolower((unsigned char)*t)) {
+            /* Check if difference is just whitespace */
+            if (isspace((unsigned char)*p) && isspace((unsigned char)*t)) {
+                /* Both are whitespace - skip and continue */
+                while (*p && isspace((unsigned char)*p)) p++;
+                while (remaining > 0 && isspace((unsigned char)*t)) {
+                    t++;
+                    remaining--;
+                }
+                continue;
+            }
+            return false;
+        }
+        p++;
+        t++;
+        remaining--;
+    }
+
+    /* Skip trailing whitespace in both */
+    while (*p && isspace((unsigned char)*p)) p++;
+    while (remaining > 0 && isspace((unsigned char)*t)) {
+        t++;
+        remaining--;
+    }
+
+    /* Both should be at end */
+    return (*p == '\0' && remaining == 0);
+}
+
+/**
+ * Preprocess bracketed spans [text]{IAL}
+ * Converts [text]{IAL} to <span markdown="span" ...>text</span> if [text] is not a reference link
+ */
+char *apex_preprocess_bracketed_spans(const char *text) {
+    if (!text) return NULL;
+
+    /* First, extract all reference link definition IDs */
+    size_t ref_count = 0;
+    char **ref_ids = extract_reference_link_ids(text, &ref_count);
+
+    size_t text_len = strlen(text);
+    size_t output_capacity = text_len * 2;  /* Worst case: every char becomes part of HTML */
+    char *output = malloc(output_capacity);
+    if (!output) {
+        /* Free ref_ids */
+        if (ref_ids) {
+            for (size_t i = 0; i < ref_count; i++) {
+                free(ref_ids[i]);
+            }
+            free(ref_ids);
+        }
+        return NULL;
+    }
+
+    const char *read = text;
+    char *write = output;
+    size_t remaining = output_capacity;
+    bool in_code_block = false;
+    bool in_inline_code = false;
+    int code_block_backticks = 0;
+
+    while (*read) {
+        /* Skip code blocks and inline code */
+        if (!in_code_block && !in_inline_code && *read == '`') {
+            int backtick_count = 1;
+            const char *p = read + 1;
+            while (*p == '`') {
+                backtick_count++;
+                p++;
+            }
+            if (backtick_count >= 3) {
+                /* Code block */
+                in_code_block = !in_code_block;
+                code_block_backticks = backtick_count;
+            } else {
+                /* Inline code */
+                in_inline_code = !in_inline_code;
+            }
+        } else if (in_code_block && *read == '`') {
+            int backtick_count = 1;
+            const char *p = read + 1;
+            while (*p == '`') {
+                backtick_count++;
+                p++;
+            }
+            if (backtick_count >= code_block_backticks) {
+                in_code_block = false;
+                code_block_backticks = 0;
+            }
+        } else if (in_inline_code && *read == '`') {
+            in_inline_code = false;
+        }
+
+        /* Only process if not in code */
+        if (!in_code_block && !in_inline_code && *read == '[') {
+            const char *bracket_start = read;
+            /* Find matching closing bracket by counting nested brackets */
+            const char *bracket_end = NULL;
+            int bracket_depth = 1;
+            const char *p = bracket_start + 1;
+
+            while (*p && bracket_depth > 0) {
+                if (*p == '[') {
+                    bracket_depth++;
+                } else if (*p == ']') {
+                    bracket_depth--;
+                    if (bracket_depth == 0) {
+                        bracket_end = p;
+                        break;
+                    }
+                }
+                p++;
+            }
+
+            if (bracket_end) {
+                /* Check if this is followed by {IAL} */
+                const char *after_bracket = bracket_end + 1;
+                /* Skip whitespace */
+                while (*after_bracket && (*after_bracket == ' ' || *after_bracket == '\t')) {
+                    after_bracket++;
+                }
+
+                if (*after_bracket == '{') {
+                    /* Found potential {IAL} - check if it's a valid IAL */
+                    const char *ial_start = after_bracket;
+                    const char *ial_end = strchr(ial_start + 1, '}');
+
+                    if (ial_end) {
+                        /* Extract text inside brackets */
+                        size_t text_len = bracket_end - (bracket_start + 1);
+                        char *bracket_text = malloc(text_len + 1);
+                        if (bracket_text) {
+                            memcpy(bracket_text, bracket_start + 1, text_len);
+                            bracket_text[text_len] = '\0';
+
+                            /* Check if this matches a reference link definition */
+                            bool is_reference_link = false;
+                            for (size_t i = 0; i < ref_count; i++) {
+                                if (reference_id_matches(ref_ids[i], bracket_text, text_len)) {
+                                    is_reference_link = true;
+                                    break;
+                                }
+                            }
+
+                            if (!is_reference_link) {
+                                /* This is a bracketed span - convert to <span> */
+                                /* Parse IAL attributes */
+                                size_t ial_len = ial_end - (ial_start + 1);
+                                apex_attributes *attrs = parse_ial_content(ial_start + 1, ial_len);
+
+                                if (attrs) {
+                                    /* Build span tag with attributes */
+                                    char *attr_str = attributes_to_html(attrs);
+                                    if (attr_str) {
+                                        /* Calculate space needed */
+                                        size_t span_open_len = 20 + strlen(attr_str) + strlen(bracket_text) + 10; /* <span markdown="span" ...>text</span> */
+                                        if (remaining < span_open_len) {
+                                            size_t written = write - output;
+                                            output_capacity = (written + span_open_len + 1) * 2;
+                                            char *new_output = realloc(output, output_capacity);
+                                            if (!new_output) {
+                                                free(bracket_text);
+                                                free(attr_str);
+                                                apex_free_attributes(attrs);
+                                                goto cleanup;
+                                            }
+                                            output = new_output;
+                                            write = output + written;
+                                            remaining = output_capacity - written;
+                                        }
+
+                                        /* Write <span markdown="span" ...> */
+                                        int written = snprintf(write, remaining, "<span markdown=\"span\"%s>", attr_str);
+                                        if (written > 0 && (size_t)written < remaining) {
+                                            write += written;
+                                            remaining -= written;
+                                        }
+
+                                        /* Write the text content */
+                                        size_t text_written = strlen(bracket_text);
+                                        if (text_written < remaining) {
+                                            memcpy(write, bracket_text, text_written);
+                                            write += text_written;
+                                            remaining -= text_written;
+                                        }
+
+                                        /* Write </span> */
+                                        if (remaining >= 7) {
+                                            memcpy(write, "</span>", 7);
+                                            write += 7;
+                                            remaining -= 7;
+                                        }
+
+                                        free(attr_str);
+                                        read = ial_end + 1;  /* Skip past the IAL */
+                                        free(bracket_text);
+                                        apex_free_attributes(attrs);
+                                        continue;
+                                    }
+                                    apex_free_attributes(attrs);
+                                }
+                                free(bracket_text);
+                            } else {
+                                free(bracket_text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Copy character as-is */
+        if (remaining > 0) {
+            *write++ = *read++;
+            remaining--;
+        } else {
+            size_t written = write - output;
+            output_capacity = (written + 1) * 2;
+            char *new_output = realloc(output, output_capacity);
+            if (!new_output) {
+                goto cleanup;
+            }
+            output = new_output;
+            write = output + written;
+            remaining = output_capacity - written;
+            *write++ = *read++;
+            remaining--;
+        }
+    }
+
+    *write = '\0';
+
+cleanup:
+    /* Free ref_ids */
+    if (ref_ids) {
+        for (size_t i = 0; i < ref_count; i++) {
+            free(ref_ids[i]);
+        }
+        free(ref_ids);
+    }
+
+    /* Check if we made any changes */
+    if (strcmp(output, text) == 0) {
+        free(output);
+        return NULL;  /* No changes */
+    }
+
+    return output;
+}
+

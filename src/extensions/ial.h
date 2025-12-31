@@ -114,6 +114,14 @@ void apex_free_image_attributes(image_attr_entry *img_attrs);
  */
 void apex_apply_image_attributes(cmark_node *document, image_attr_entry *img_attrs);
 
+/**
+ * Preprocess bracketed spans [text]{IAL}
+ * Converts [text]{IAL} to <span markdown="span" ...>text</span> if [text] is not a reference link
+ * @param text Input markdown text
+ * @return Preprocessed markdown text (must be freed by caller), or NULL if unchanged
+ */
+char *apex_preprocess_bracketed_spans(const char *text);
+
 #ifdef __cplusplus
 }
 #endif

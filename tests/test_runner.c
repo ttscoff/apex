@@ -1148,6 +1148,111 @@ static void test_ial(void) {
 }
 
 /**
+ * Test bracketed spans [text]{IAL}
+ */
+static void test_bracketed_spans(void) {
+    printf("\n=== Bracketed Spans Tests ===\n");
+
+    apex_options opts = apex_options_default();
+    opts.enable_spans = true;
+    char *html;
+
+    /* Test basic bracketed span with class */
+    const char *basic_span = "This is [some text]{.class} with a span.";
+    html = apex_markdown_to_html(basic_span, strlen(basic_span), &opts);
+    assert_contains(html, "<span", "Bracketed span creates span tag");
+    assert_contains(html, "class=\"class\"", "Bracketed span has class");
+    assert_contains(html, "markdown=\"span\"", "Bracketed span has markdown attribute");
+    assert_contains(html, "some text", "Bracketed span contains text");
+    assert_not_contains(html, "[some text]{.class}", "Bracketed span syntax removed");
+    apex_free_string(html);
+
+    /* Test bracketed span with ID */
+    const char *span_with_id = "This is [text]{#my-id} with an ID.";
+    html = apex_markdown_to_html(span_with_id, strlen(span_with_id), &opts);
+    assert_contains(html, "id=\"my-id\"", "Bracketed span has ID");
+    apex_free_string(html);
+
+    /* Test bracketed span with multiple attributes */
+    const char *span_multi = "This is [text]{#id .class1 .class2 key=\"value\"} with multiple attributes.";
+    html = apex_markdown_to_html(span_multi, strlen(span_multi), &opts);
+    assert_contains(html, "id=\"id\"", "Bracketed span has ID");
+    assert_contains(html, "class=\"class1 class2\"", "Bracketed span has multiple classes");
+    assert_contains(html, "key=\"value\"", "Bracketed span has custom attribute");
+    apex_free_string(html);
+
+    /* Test bracketed span with markdown inside */
+    const char *span_markdown = "This is [some *text*]{.highlight} with markdown.";
+    html = apex_markdown_to_html(span_markdown, strlen(span_markdown), &opts);
+    assert_contains(html, "<em>text</em>", "Bracketed span processes markdown inside");
+    assert_contains(html, "class=\"highlight\"", "Bracketed span with markdown has class");
+    apex_free_string(html);
+
+    /* Test reference link takes precedence over span */
+    const char *ref_link = "This is [a link] that should be a link.\n\n[a link]: https://example.com";
+    html = apex_markdown_to_html(ref_link, strlen(ref_link), &opts);
+    assert_contains(html, "<a href", "Reference link creates link tag");
+    assert_contains(html, "https://example.com", "Reference link has correct URL");
+    assert_not_contains(html, "<span", "Reference link does not create span");
+    apex_free_string(html);
+
+    /* Test reference link with different ID */
+    const char *ref_link2 = "This is [another link][ref] that should be a link.\n\n[ref]: https://example.org";
+    html = apex_markdown_to_html(ref_link2, strlen(ref_link2), &opts);
+    assert_contains(html, "<a href", "Reference link with ID creates link tag");
+    assert_contains(html, "https://example.org", "Reference link with ID has correct URL");
+    assert_not_contains(html, "<span", "Reference link with ID does not create span");
+    apex_free_string(html);
+
+    /* Test mixed reference link and span */
+    const char *mixed = "This has [a link][ref] and [a span]{.span-class}.\n\n[ref]: https://example.com";
+    html = apex_markdown_to_html(mixed, strlen(mixed), &opts);
+    assert_contains(html, "<a href", "Mixed content has link");
+    assert_contains(html, "<span", "Mixed content has span");
+    assert_contains(html, "class=\"span-class\"", "Mixed content span has class");
+    apex_free_string(html);
+
+    /* Test bracketed span with bold markdown */
+    const char *span_bold = "This is [**bold text**]{.bold} in a span.";
+    html = apex_markdown_to_html(span_bold, strlen(span_bold), &opts);
+    assert_contains(html, "<strong>bold text</strong>", "Bracketed span processes bold markdown");
+    apex_free_string(html);
+
+    /* Test bracketed span with code markdown */
+    const char *span_code = "This is [`code`]{.code-style} in a span.";
+    html = apex_markdown_to_html(span_code, strlen(span_code), &opts);
+    assert_contains(html, "<code>code</code>", "Bracketed span processes code markdown");
+    apex_free_string(html);
+
+    /* Test bracketed span with nested brackets */
+    const char *span_nested = "This is [Text with [nested brackets]]{.nested} that should work.";
+    html = apex_markdown_to_html(span_nested, strlen(span_nested), &opts);
+    assert_contains(html, "<span", "Bracketed span with nested brackets creates span");
+    assert_contains(html, "class=\"nested\"", "Bracketed span with nested brackets has class");
+    assert_contains(html, "Text with [nested brackets]", "Bracketed span with nested brackets contains full text");
+    assert_not_contains(html, "[Text with [nested brackets]]{.nested}", "Bracketed span syntax removed");
+    apex_free_string(html);
+
+    /* Test that spans are disabled when flag is off */
+    apex_options no_spans = apex_options_default();
+    no_spans.enable_spans = false;
+    const char *span_disabled = "This is [text]{.class} that should NOT be a span.";
+    html = apex_markdown_to_html(span_disabled, strlen(span_disabled), &no_spans);
+    /* When spans are disabled, [text]{.class} should remain as-is or be treated differently */
+    /* For now, we'll just check that it doesn't create a span when disabled */
+    if (strstr(html, "<span") == NULL || strstr(html, "markdown=\"span\"") == NULL) {
+        tests_passed++;
+        tests_run++;
+        printf(COLOR_GREEN "✓" COLOR_RESET " Bracketed spans disabled when flag is off\n");
+    } else {
+        tests_failed++;
+        tests_run++;
+        printf(COLOR_RED "✗" COLOR_RESET " Bracketed spans incorrectly enabled when flag is off\n");
+    }
+    apex_free_string(html);
+}
+
+/**
  * Test definition lists
  */
 static void test_definition_lists(void) {
@@ -4183,6 +4288,7 @@ int main(int argc, char *argv[]) {
     /* High-priority feature tests */
     test_file_includes();
     test_ial();
+    test_bracketed_spans();
     test_definition_lists();
     test_advanced_tables();
     test_relaxed_tables();

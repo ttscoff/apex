@@ -568,6 +568,33 @@ src/extensions/emoji.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex_static.dir/build.make CMakeFiles/apex_static.dir/src/extensions/emoji.c.s
 .PHONY : src/extensions/emoji.c.s
 
+src/extensions/fenced_divs.o: src/extensions/fenced_divs.c.o
+.PHONY : src/extensions/fenced_divs.o
+
+# target to build an object file
+src/extensions/fenced_divs.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex.dir/build.make CMakeFiles/apex.dir/src/extensions/fenced_divs.c.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex_static.dir/build.make CMakeFiles/apex_static.dir/src/extensions/fenced_divs.c.o
+.PHONY : src/extensions/fenced_divs.c.o
+
+src/extensions/fenced_divs.i: src/extensions/fenced_divs.c.i
+.PHONY : src/extensions/fenced_divs.i
+
+# target to preprocess a source file
+src/extensions/fenced_divs.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex.dir/build.make CMakeFiles/apex.dir/src/extensions/fenced_divs.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex_static.dir/build.make CMakeFiles/apex_static.dir/src/extensions/fenced_divs.c.i
+.PHONY : src/extensions/fenced_divs.c.i
+
+src/extensions/fenced_divs.s: src/extensions/fenced_divs.c.s
+.PHONY : src/extensions/fenced_divs.s
+
+# target to generate assembly for a file
+src/extensions/fenced_divs.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex.dir/build.make CMakeFiles/apex.dir/src/extensions/fenced_divs.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/apex_static.dir/build.make CMakeFiles/apex_static.dir/src/extensions/fenced_divs.c.s
+.PHONY : src/extensions/fenced_divs.c.s
+
 src/extensions/header_ids.o: src/extensions/header_ids.c.o
 .PHONY : src/extensions/header_ids.o
 
@@ -1212,6 +1239,9 @@ help:
 	@echo "... src/extensions/emoji.o"
 	@echo "... src/extensions/emoji.i"
 	@echo "... src/extensions/emoji.s"
+	@echo "... src/extensions/fenced_divs.o"
+	@echo "... src/extensions/fenced_divs.i"
+	@echo "... src/extensions/fenced_divs.s"
 	@echo "... src/extensions/header_ids.o"
 	@echo "... src/extensions/header_ids.i"
 	@echo "... src/extensions/header_ids.s"

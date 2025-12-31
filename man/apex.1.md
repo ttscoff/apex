@@ -169,6 +169,12 @@ If no file is specified, **apex** reads from stdin.
 **--sup-sub**, **--no-sup-sub**
 :   Enable MultiMarkdown-style superscript and subscript syntax. The `^` character creates superscript for the text immediately following it (stops at space or punctuation). The `~` character creates subscript when used within a word/identifier (e.g., `H~2~O` creates H₂O). When tildes are at word boundaries (e.g., `~text~`), they create underline instead. Default: enabled in unified and MultiMarkdown modes.
 
+**--divs**, **--no-divs**
+:   Enable or disable Pandoc fenced divs syntax (`::::: {#id .class} ... :::::`). Fenced divs allow you to create HTML `<div>` elements with attributes using a special fence syntax. Opening fences must have at least 3 colons and attributes; closing fences need at least 3 colons. Fenced divs can be nested. Default: enabled in unified mode only.
+
+**--spans**, **--no-spans**
+:   Enable or disable Pandoc-style bracketed spans syntax (`[text]{#id .class key="val"}`). Bracketed spans allow you to create HTML `<span>` elements with attributes. The text inside the brackets is processed as markdown. If the bracketed text matches a reference link definition, it will be treated as a link instead of a span. Default: enabled in unified mode only.
+
 ## Citations and Bibliography
 
 **--bibliography** *FILE*

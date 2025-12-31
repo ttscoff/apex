@@ -1829,6 +1829,7 @@ apex_options apex_options_default(void) {
     opts.enable_callouts = true;
     opts.enable_marked_extensions = true;
     opts.enable_divs = true;  /* Enabled by default in unified mode */
+    opts.enable_spans = true;  /* Enabled by default in unified mode */
 
     /* Critic markup mode (0=accept, 1=reject, 2=markup) */
     opts.critic_mode = 2;  /* Default: show markup */
@@ -1937,6 +1938,7 @@ apex_options apex_options_for_mode(apex_mode_t mode) {
             opts.enable_callouts = false;
             opts.enable_marked_extensions = false;
             opts.enable_divs = false;
+            opts.enable_spans = false;
             opts.enable_file_includes = false;
             opts.enable_metadata_variables = false;
             opts.enable_metadata_transforms = false;
@@ -1965,6 +1967,7 @@ apex_options apex_options_for_mode(apex_mode_t mode) {
             opts.enable_callouts = false;
             opts.enable_marked_extensions = false;
             opts.enable_divs = false;
+            opts.enable_spans = false;
             opts.enable_file_includes = false;
             opts.enable_metadata_variables = false;
             opts.enable_metadata_transforms = false;
@@ -1994,6 +1997,7 @@ apex_options apex_options_for_mode(apex_mode_t mode) {
             opts.enable_callouts = false;
             opts.enable_marked_extensions = false;
             opts.enable_divs = false;
+            opts.enable_spans = false;
             opts.enable_file_includes = true;
             opts.enable_metadata_variables = true;
             opts.enable_metadata_transforms = false;
@@ -2026,6 +2030,7 @@ apex_options apex_options_for_mode(apex_mode_t mode) {
              * for table-of-contents generation. */
             opts.enable_marked_extensions = true;
             opts.enable_divs = false;
+            opts.enable_spans = false;
             opts.enable_file_includes = false;
             opts.enable_metadata_variables = false;
             opts.enable_metadata_transforms = false;
@@ -2055,6 +2060,7 @@ apex_options apex_options_for_mode(apex_mode_t mode) {
             opts.enable_mmark_index_syntax = true;  /* Unified: mmark index syntax */
             opts.enable_textindex_syntax = true;  /* Unified: TextIndex syntax enabled */
             opts.enable_divs = true;  /* Unified: Pandoc fenced divs enabled */
+            opts.enable_spans = true;  /* Unified: bracketed spans enabled */
             break;
     }
 
@@ -2468,6 +2474,17 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
         PROFILE_END(ial_preprocess);
         if (ial_preprocessed) {
             text_ptr = ial_preprocessed;
+        }
+    }
+
+    /* Preprocess bracketed spans [text]{IAL} */
+    char *spans_preprocessed = NULL;
+    if (options->enable_spans && (options->mode == APEX_MODE_UNIFIED || options->mode == APEX_MODE_KRAMDOWN)) {
+        PROFILE_START(spans_preprocess);
+        spans_preprocessed = apex_preprocess_bracketed_spans(text_ptr);
+        PROFILE_END(spans_preprocess);
+        if (spans_preprocessed) {
+            text_ptr = spans_preprocessed;
         }
     }
 
@@ -3055,6 +3072,7 @@ char *apex_markdown_to_html(const char *markdown, size_t len, const apex_options
     cmark_parser_free(parser);
     free(working_text);
     if (ial_preprocessed) free(ial_preprocessed);
+    if (spans_preprocessed) free(spans_preprocessed);
     if (includes_processed) free(includes_processed);
     if (markers_processed_early) {
         /* Only free if alpha_lists_processed didn't use it */
