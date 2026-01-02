@@ -910,13 +910,24 @@ char *apex_inject_header_ids(const char *html, cmark_node *document, bool genera
             /* Check if ID already exists in the tag */
             bool has_id = false;
             const char *id_attr = strstr(tag_start, "id=");
+            const char *id_start = NULL;
+            const char *id_end = NULL;
             if (id_attr && id_attr < tag_end) {
                 has_id = true;
+                /* Find the ID value boundaries for replacement */
+                id_start = id_attr + 3; /* After 'id=' */
+                while (id_start < tag_end && (*id_start == ' ' || *id_start == '"' || *id_start == '\'')) {
+                    id_start++;
+                }
+                id_end = id_start;
+                while (id_end < tag_end && *id_end != '"' && *id_end != '\'' && *id_end != ' ' && *id_end != '>') {
+                    id_end++;
+                }
             }
 
-            /* Get the header ID if we need to inject one */
+            /* Get the header ID - always get it so we can replace existing IDs */
             header_id_map *header = NULL;
-            if (!has_id && current_header_idx < header_count) {
+            if (current_header_idx < header_count) {
                 header = header_map;
                 for (int i = 0; i < current_header_idx && header; i++) {
                     header = header->next;
@@ -946,60 +957,118 @@ char *apex_inject_header_ids(const char *html, cmark_node *document, bool genera
                 }
                 current_header_idx++;
             } else if (!use_anchors && header && header->id) {
-                /* For header IDs: copy tag up to '>', inject id attribute, then copy '>' */
-                const char *after_tag_name = tag_start + 3;
-                while (*after_tag_name && *after_tag_name != '>' && !isspace((unsigned char)*after_tag_name)) {
-                    after_tag_name++;
-                }
-
-                /* Copy '<hN' */
-                size_t tag_prefix_len = after_tag_name - tag_start;
-                if (tag_prefix_len <= remaining) {
-                    memcpy(write, tag_start, tag_prefix_len);
-                    write += tag_prefix_len;
-                    remaining -= tag_prefix_len;
-                }
-                read = after_tag_name;
-
-                /* Copy any existing attributes before injecting id */
-                const char *attr_start = read;
-                while (*read && *read != '>') {
-                    read++;
-                }
-
-                /* If there are existing attributes, copy them */
-                if (read > attr_start) {
-                    size_t attr_len = read - attr_start;
-                    if (attr_len <= remaining) {
-                        memcpy(write, attr_start, attr_len);
-                        write += attr_len;
-                        remaining -= attr_len;
+                /* For header IDs: replace existing ID or inject new one */
+                if (has_id && id_attr) {
+                    /* Replace existing ID: copy up to id=, skip old ID value, inject new ID, copy rest */
+                    size_t before_id_len = id_attr - tag_start;
+                    if (before_id_len <= remaining) {
+                        memcpy(write, tag_start, before_id_len);
+                        write += before_id_len;
+                        remaining -= before_id_len;
                     }
-                }
 
-                /* Add space before id attribute if needed */
-                if ((read > attr_start || *read == '>') && remaining > 0) {
-                    *write++ = ' ';
-                    remaining--;
-                }
+                    /* Find the end of the old ID attribute value */
+                    const char *old_id_end = id_attr + 3; /* After 'id=' */
+                    /* Skip whitespace and opening quote */
+                    while (old_id_end < tag_end && (old_id_end[0] == ' ' || old_id_end[0] == '"' || old_id_end[0] == '\'')) {
+                        old_id_end++;
+                    }
+                    /* Skip the ID value until closing quote or space or > */
+                    while (old_id_end < tag_end && old_id_end[0] != '"' && old_id_end[0] != '\'' && old_id_end[0] != ' ' && old_id_end[0] != '>') {
+                        old_id_end++;
+                    }
+                    /* Skip closing quote if present */
+                    if (old_id_end < tag_end && (old_id_end[0] == '"' || old_id_end[0] == '\'')) {
+                        old_id_end++;
+                    }
 
-                /* Inject id="..." */
-                char id_attr_str[512];
-                snprintf(id_attr_str, sizeof(id_attr_str), "id=\"%s\"", header->id);
-                size_t id_len = strlen(id_attr_str);
-                if (id_len <= remaining) {
-                    memcpy(write, id_attr_str, id_len);
-                    write += id_len;
-                    remaining -= id_len;
-                }
+                    /* Inject new id="..." */
+                    char id_attr_str[512];
+                    snprintf(id_attr_str, sizeof(id_attr_str), "id=\"%s\"", header->id);
+                    size_t id_len = strlen(id_attr_str);
+                    if (id_len <= remaining) {
+                        memcpy(write, id_attr_str, id_len);
+                        write += id_len;
+                        remaining -= id_len;
+                    }
 
-                /* Copy closing '>' */
-                if (*read == '>') {
-                    if (remaining > 0) {
-                        *write++ = *read++;
-                        remaining--;
-                    } else {
+                    /* Copy rest of tag from after old ID until '>' */
+                    read = old_id_end;
+                    while (read < tag_end && *read != '>') {
+                        if (remaining > 0) {
+                            *write++ = *read++;
+                            remaining--;
+                        } else {
+                            read++;
+                        }
+                    }
+
+                    /* Copy closing '>' */
+                    if (read < tag_end && *read == '>') {
+                        if (remaining > 0) {
+                            *write++ = *read++;
+                            remaining--;
+                        } else {
+                            read++;
+                        }
+                    }
+                    current_header_idx++;
+                } else {
+                    /* No existing ID: copy tag up to '>', inject id attribute, then copy '>' */
+                    const char *after_tag_name = tag_start + 3;
+                    while (*after_tag_name && *after_tag_name != '>' && !isspace((unsigned char)*after_tag_name)) {
+                        after_tag_name++;
+                    }
+
+                    /* Copy '<hN' */
+                    size_t tag_prefix_len = after_tag_name - tag_start;
+                    if (tag_prefix_len <= remaining) {
+                        memcpy(write, tag_start, tag_prefix_len);
+                        write += tag_prefix_len;
+                        remaining -= tag_prefix_len;
+                    }
+                    read = after_tag_name;
+
+                    /* Copy any existing attributes before injecting id */
+                    const char *attr_start = read;
+                    while (*read && *read != '>') {
                         read++;
+                    }
+
+                    /* If there are existing attributes, copy them */
+                    if (read > attr_start) {
+                        size_t attr_len = read - attr_start;
+                        if (attr_len <= remaining) {
+                            memcpy(write, attr_start, attr_len);
+                            write += attr_len;
+                            remaining -= attr_len;
+                        }
+                    }
+
+                    /* Add space before id attribute if needed */
+                    if ((read > attr_start || *read == '>') && remaining > 0) {
+                        *write++ = ' ';
+                        remaining--;
+                    }
+
+                    /* Inject id="..." */
+                    char id_attr_str[512];
+                    snprintf(id_attr_str, sizeof(id_attr_str), "id=\"%s\"", header->id);
+                    size_t id_len = strlen(id_attr_str);
+                    if (id_len <= remaining) {
+                        memcpy(write, id_attr_str, id_len);
+                        write += id_len;
+                        remaining -= id_len;
+                    }
+
+                    /* Copy closing '>' */
+                    if (*read == '>') {
+                        if (remaining > 0) {
+                            *write++ = *read++;
+                            remaining--;
+                        } else {
+                            read++;
+                        }
                     }
                 }
                 current_header_idx++;

@@ -161,14 +161,18 @@ release-macos:
 	@cd $(BUILD_DIR) && $(MAKE) -j$$(sysctl -n hw.ncpu) apex_cli
 	@mkdir -p $(RELEASE_DIR)/apex-$(VERSION)-macos-universal
 	@cp $(BUILD_DIR)/apex $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex
-	@echo "Fixing libyaml library path for Homebrew compatibility..."
-	@if otool -L $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex | grep -q "libyaml-universal"; then \
-		echo "  Changing libyaml path to Homebrew location..."; \
-		install_name_tool -change "/Users/runner/work/apex/apex/deps/libyaml-universal/lib/libyaml-0.2.dylib" "/opt/homebrew/lib/libyaml-0.2.dylib" $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || \
-		install_name_tool -change "/Users/runner/work/apex/apex/deps/libyaml-universal/lib/libyaml-0.2.dylib" "/usr/local/lib/libyaml-0.2.dylib" $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || \
-		echo "  Warning: Could not fix libyaml path"; \
+	@echo "Fixing libyaml library path to use @rpath for portability..."
+	@if otool -L $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex | grep -q "libyaml.*dylib"; then \
+		echo "  Adding rpaths for common libyaml locations..."; \
+		install_name_tool -add_rpath /usr/local/lib $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || true; \
+		install_name_tool -add_rpath /opt/homebrew/lib $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || true; \
+		echo "  Changing libyaml path to use @rpath..."; \
+		install_name_tool -change "/Users/runner/work/apex/apex/deps/libyaml-universal/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || true; \
+		install_name_tool -change "/opt/homebrew/opt/libyaml/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || true; \
+		install_name_tool -change "/usr/local/opt/libyaml/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $(RELEASE_DIR)/apex-$(VERSION)-macos-universal/apex 2>/dev/null || true; \
+		echo "  libyaml now uses @rpath - binary will look for libyaml in /usr/local/lib and /opt/homebrew/lib"; \
 	else \
-		echo "  No libyaml-universal path found, skipping fix"; \
+		echo "  No libyaml found, skipping fix"; \
 	fi
 	@if [ -n "$(SIGNING_IDENTITY)" ] && [ "$(SIGNING_IDENTITY)" != "none" ]; then \
 		echo "Signing binary with identity: $(SIGNING_IDENTITY)..."; \

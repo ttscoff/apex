@@ -4,43 +4,34 @@ author: Test Suite
 date: 2025-12-05
 version: 1.0
 keywords: markdown, processor, test, benchmark
-description: A comprehensive test document exercising all
-Apex features
+description: A comprehensive test document exercising all Apex features
 ---
 
 # Apex Markdown Processor: Complete Feature Demonstration
 
-This document exercises **every feature** of the Apex
-Markdown processor, providing both a comprehensive test and
-a real-world performance benchmark.
+This document exercises **every feature** of the Apex Markdown processor, providing both a comprehensive test and a real-world performance benchmark.
 
 {{TOC:2-4}}
 
 ## Introduction and Metadata
 
-The document begins with YAML metadata (extracted above). We
-can reference metadata variables like this:
+The document begins with YAML metadata (extracted above). We can reference metadata variables like this:
 
 - Title: [%title]
 - Author: [%author]
 - Version: [%version]
 
-This demonstrates **metadata extraction** and **variable
-replacement**.
+This demonstrates **metadata extraction** and **variable replacement**.
 
 ## Basic Markdown Syntax
 
 ### Text Formatting
 
-This paragraph demonstrates *italic text*, **bold text**,
-***bold italic***, ~~strikethrough text~~, and `inline
-code`. We can also use ==highlighted text== and {++inserted
-text++}.
+This paragraph demonstrates *italic text*, **bold text**, ***bold italic***, ~~strikethrough text~~, and `inline code`. We can also use ==highlighted text== and {++inserted text++}.
 
 ### Typography Enhancements
 
 Smart typography converts:
-
 - Three dashes --- into em-dash
 - Two dashes -- into en-dash
 - Three dots... into ellipsis
@@ -80,15 +71,11 @@ Here's a [standard link](https://example.com "Example Site") and an autolink: ht
 
 ### Wiki Links
 
-Navigate to [[Home]] or [[Documentation|Docs]] or
-[[API#Methods]].
+Navigate to [[Home]] or [[Documentation|Docs]] or [[API#Methods]].
 
 ### Footnotes
 
-Here's a simple footnote[^1] and another one[^2]. We also
-support inline footnotes^[This is an inline footnote] and
-MMD inline footnotes[^This is an MMD style inline footnote
-with spaces].
+Here's a simple footnote[^1] and another one[^2]. We also support inline footnotes^[This is an inline footnote] and MMD inline footnotes[^This is an MMD style inline footnote with spaces].
 
 [^1]: This is the first footnote with **formatted** content.
 
@@ -99,7 +86,6 @@ with spaces].
     ```python
     def example():
         return "footnote code"
-
     ```
 
     And other block-level content!
@@ -128,7 +114,6 @@ class MarkdownProcessor {
         return this.transform(text);
     }
 }
-
 ```
 
 ```python
@@ -142,7 +127,6 @@ def fibonacci(n):
 # List comprehension
 squares = [x**2 for x in range(10)]
 print(f"Squares: {squares}")
-
 ```
 
 ```bash
@@ -152,16 +136,13 @@ echo "Testing Apex processor"
 for file in *.md; do
     ./apex "$file" > "${file%.md}.html"
 done
-
 ```
 
 ## Mathematics
 
 ### Inline Math
 
-The quadratic formula is $x = \frac{-b \pm
-\sqrt{b^2-4ac}}{2a}$ and Einstein's famous equation is $E =
-mc^2$.
+The quadratic formula is $x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}$ and Einstein's famous equation is $E = mc^2$.
 
 ### Display Math
 
@@ -177,9 +158,8 @@ $$
 
 ### Basic Table
 
-| Feature | CommonMark | GFM | MMD | Kramdown | Apex |
-| -------------- | ---------- | --- | --- | -------- | ----
-|
+| Feature        | CommonMark | GFM | MMD | Kramdown | Apex |
+| -------------- | ---------- | --- | --- | -------- | ---- |
 | Basic Markdown | ✅         | ✅  | ✅  | ✅       | ✅   |
 | Tables         | ❌         | ✅  | ✅  | ✅       | ✅   |
 | Footnotes      | ❌         | ❌  | ✅  | ✅       | ✅   |
@@ -216,15 +196,13 @@ Use `^^` to merge cells vertically (rowspan):
 This table combines both rowspan and colspan features:
 
 [Employee Performance Q4 2025]
-| Department | Employee | Q1-Q2 Average | Q3 | Q4 | Overall
-|
-| ----------- | -------- | ------------- | --- | ----- |
-------- |
-| Engineering | Alice | 93.5 | 94 | 96 | 94.25 |
-| ^^ | Bob | 89.0 | 87 | 91 | 89.00 |
-| Marketing | Charlie | Absent | | 92.00 | |
-| Sales | Diana | 87.5 | 88 | 90 | 88.50 |
-| ^^ | Eve | 93.0 | 95 | 93 | 93.50 |
+| Department  | Employee | Q1-Q2 Average | Q3  | Q4    | Overall |
+| ----------- | -------- | ------------- | --- | ----- | ------- |
+| Engineering | Alice    | 93.5          | 94  | 96    | 94.25   |
+| ^^          | Bob      | 89.0          | 87  | 91    | 89.00   |
+| Marketing   | Charlie  | Absent        |     | 92.00 |         |
+| Sales       | Diana    | 87.5          | 88  | 90    | 88.50   |
+| ^^          | Eve      | 93.0          | 95  | 93    | 93.50   |
 {: .performance-table #q4-results}
 
 ## Blockquotes and Callouts
@@ -239,16 +217,13 @@ This table combines both rowspan and colspan features:
 ### Callouts
 
 > [!NOTE]
-> This is an informational note callout. It provides helpful
-> context.
+> This is an informational note callout. It provides helpful context.
 
 > [!WARNING]
-> This is a warning callout. Pay attention to this important
-> information!
+> This is a warning callout. Pay attention to this important information!
 
 > [!TIP]
-> This is a tip callout with useful advice for optimal
-> results.
+> This is a tip callout with useful advice for optimal results.
 
 > [!IMPORTANT]
 > This is an important callout that requires your attention.
@@ -277,7 +252,6 @@ CommonMark
 
   ```
   code blocks
-
   ```
 
   And more!
@@ -286,8 +260,7 @@ CommonMark
 
 Here's some text with {++additions++} and {--deletions--}.
 
-You can also show {~~replacements~>substitutions~~} in your
-text.
+You can also show {~~replacements~>substitutions~~} in your text.
 
 {==Highlighted text==} draws attention to important content.
 
@@ -295,9 +268,7 @@ text.
 
 ## Abbreviations
 
-This document uses HTML, CSS, and JS extensively. The MMD
-processor is faster than the GFM processor, but the Apex
-processor is the fastest.
+This document uses HTML, CSS, and JS extensively. The MMD processor is faster than the GFM processor, but the Apex processor is the fastest.
 
 *[HTML]: HyperText Markup Language
 *[CSS]: Cascading Style Sheets
@@ -305,13 +276,11 @@ processor is the fastest.
 *[MMD]: MultiMarkdown
 *[GFM]: GitHub Flavored Markdown
 
-You can also use [>API] inline or [>(URL) Uniform Resource
-Locator] abbreviations.
+You can also use [>API] inline or [>(URL) Uniform Resource Locator] abbreviations.
 
 ## Emoji Support
 
-Apex supports GitHub emoji :rocket: :sparkles: :zap: :fire:
-:tada:
+Apex supports GitHub emoji :rocket: :sparkles: :zap: :fire: :tada:
 
 Common emoji: :smile: :heart: :thumbsup: :star: :warning:
 
@@ -331,8 +300,7 @@ This is a paragraph with an ID and classes.
 
 This is text with styled content in the middle.
 
-Note: Inline IAL syntax like [text]{: .class} is not yet
-implemented.
+Note: Inline IAL syntax like [text]{: .class} is not yet implemented.
 
 ## Special Markers
 
@@ -354,8 +322,7 @@ This is content that will pause for 5 seconds.
 
 <!--PAUSE:5-->
 
-This content appears after the pause (useful for
-presentations).
+This content appears after the pause (useful for presentations).
 
 ## End of Block Markers
 
@@ -369,16 +336,14 @@ And this starts a new paragraph despite no blank line.
 
 ## This is Markdown inside HTML
 
-You can use **all** markdown features inside HTML blocks if
-you set `markdown="1"`.
+You can use **all** markdown features inside HTML blocks if you set `markdown="1"`.
 
 - Lists work
 - So do other features
 
 </div>
 
-<span markdown="span">This is *inline* markdown in
-HTML</span>
+<span markdown="span">This is *inline* markdown in HTML</span>
 
 ## File Inclusion
 
@@ -421,7 +386,6 @@ ___
    function nested() {
        return "complex";
    }
-
    ```
 
    - Back to nested lists
@@ -429,14 +393,9 @@ ___
 
 ### Mixed Content
 
-Here's a paragraph with *italic*, **bold**, `code`,
-[link](url), ![image](img.jpg), footnote[^3], math $x^2$,
-emoji :smile:, ~~strike~~, ==highlight==, {++insert++}, wiki
-[[link]], abbreviation using HTML, and [styled text]{:
-.highlight}.
+Here's a paragraph with *italic*, **bold**, `code`, [link](url), ![image](img.jpg), footnote[^3], math $x^2$, emoji :smile:, ~~strike~~, ==highlight==, {++insert++}, wiki [[link]], abbreviation using HTML, and [styled text]{: .highlight}.
 
-[^3]: Complex footnote with **formatting**, `code`,
-[links](url), and more!
+[^3]: Complex footnote with **formatting**, `code`, [links](url), and more!
 
 ## Inline Attribute Lists
 
@@ -458,50 +417,28 @@ Apply attributes by reference: {:toc}
 
 ## Large Table for Performance Testing
 
-| ID | Name | Department | Email | Phone | Location | Status
-| Join Date |
-| --- | --------------- | ----------- | ------------------ |
--------- | ----------- | -------- | ---------- |
-| 001 | Alice Johnson | Engineering | alice@example.com |
-555-0101 | New York | Active | 2020-01-15 |
-| 002 | Bob Smith | Marketing | bob@example.com | 555-0102 |
-Chicago | Active | 2020-03-22 |
-| 003 | Carol Williams | Sales | carol@example.com |
-555-0103 | Los Angeles | Active | 2020-05-10 |
-| 004 | David Brown | Engineering | david@example.com |
-555-0104 | New York | Active | 2020-07-01 |
-| 005 | Eve Davis | HR | eve@example.com | 555-0105 | Boston
-| Active | 2020-09-15 |
-| 006 | Frank Miller | Engineering | frank@example.com |
-555-0106 | Seattle | Active | 2021-01-20 |
-| 007 | Grace Wilson | Marketing | grace@example.com |
-555-0107 | Austin | Active | 2021-03-08 |
-| 008 | Henry Moore | Sales | henry@example.com | 555-0108 |
-Denver | Active | 2021-05-12 |
-| 009 | Iris Taylor | Engineering | iris@example.com |
-555-0109 | Portland | Active | 2021-07-25 |
-| 010 | Jack Anderson | Finance | jack@example.com |
-555-0110 | Miami | Active | 2021-09-30 |
-| 011 | Karen Thomas | HR | karen@example.com | 555-0111 |
-Dallas | Active | 2022-01-15 |
-| 012 | Larry Jackson | Engineering | larry@example.com |
-555-0112 | San Jose | Active | 2022-03-20 |
-| 013 | Mary White | Marketing | mary@example.com | 555-0113
-| Phoenix | Active | 2022-05-08 |
-| 014 | Nathan Harris | Sales | nathan@example.com |
-555-0114 | Atlanta | On Leave | 2022-07-14 |
-| 015 | Olivia Martin | Engineering | olivia@example.com |
-555-0115 | Seattle | Active | 2022-09-01 |
-| 016 | Paul Thompson | Finance | paul@example.com |
-555-0116 | Houston | Active | 2023-01-10 |
-| 017 | Quinn Garcia | HR | quinn@example.com | 555-0117 |
-Tampa | Active | 2023-03-15 |
-| 018 | Rachel Martinez | Engineering | rachel@example.com |
-555-0118 | Orlando | Active | 2023-05-20 |
-| 019 | Sam Robinson | Marketing | sam@example.com |
-555-0119 | Vegas | Active | 2023-07-12 |
-| 020 | Tina Clark | Sales | tina@example.com | 555-0120 |
-Nashville | Active | 2023-09-25 |
+| ID  | Name            | Department  | Email              | Phone    | Location    | Status   | Join Date  |
+| --- | --------------- | ----------- | ------------------ | -------- | ----------- | -------- | ---------- |
+| 001 | Alice Johnson   | Engineering | alice@example.com  | 555-0101 | New York    | Active   | 2020-01-15 |
+| 002 | Bob Smith       | Marketing   | bob@example.com    | 555-0102 | Chicago     | Active   | 2020-03-22 |
+| 003 | Carol Williams  | Sales       | carol@example.com  | 555-0103 | Los Angeles | Active   | 2020-05-10 |
+| 004 | David Brown     | Engineering | david@example.com  | 555-0104 | New York    | Active   | 2020-07-01 |
+| 005 | Eve Davis       | HR          | eve@example.com    | 555-0105 | Boston      | Active   | 2020-09-15 |
+| 006 | Frank Miller    | Engineering | frank@example.com  | 555-0106 | Seattle     | Active   | 2021-01-20 |
+| 007 | Grace Wilson    | Marketing   | grace@example.com  | 555-0107 | Austin      | Active   | 2021-03-08 |
+| 008 | Henry Moore     | Sales       | henry@example.com  | 555-0108 | Denver      | Active   | 2021-05-12 |
+| 009 | Iris Taylor     | Engineering | iris@example.com   | 555-0109 | Portland    | Active   | 2021-07-25 |
+| 010 | Jack Anderson   | Finance     | jack@example.com   | 555-0110 | Miami       | Active   | 2021-09-30 |
+| 011 | Karen Thomas    | HR          | karen@example.com  | 555-0111 | Dallas      | Active   | 2022-01-15 |
+| 012 | Larry Jackson   | Engineering | larry@example.com  | 555-0112 | San Jose    | Active   | 2022-03-20 |
+| 013 | Mary White      | Marketing   | mary@example.com   | 555-0113 | Phoenix     | Active   | 2022-05-08 |
+| 014 | Nathan Harris   | Sales       | nathan@example.com | 555-0114 | Atlanta     | On Leave | 2022-07-14 |
+| 015 | Olivia Martin   | Engineering | olivia@example.com | 555-0115 | Seattle     | Active   | 2022-09-01 |
+| 016 | Paul Thompson   | Finance     | paul@example.com   | 555-0116 | Houston     | Active   | 2023-01-10 |
+| 017 | Quinn Garcia    | HR          | quinn@example.com  | 555-0117 | Tampa       | Active   | 2023-03-15 |
+| 018 | Rachel Martinez | Engineering | rachel@example.com | 555-0118 | Orlando     | Active   | 2023-05-20 |
+| 019 | Sam Robinson    | Marketing   | sam@example.com    | 555-0119 | Vegas       | Active   | 2023-07-12 |
+| 020 | Tina Clark      | Sales       | tina@example.com   | 555-0120 | Nashville   | Active   | 2023-09-25 |
 
 ## Repeated Sections for Volume
 
@@ -523,7 +460,6 @@ class Engineer:
         if self.validate(pull_request):
             return "LGTM"
         return "Needs changes"
-
 ```
 
 Key technologies:
@@ -537,19 +473,16 @@ Key technologies:
 
 Marketing metrics for Q4:
 
-| Campaign | Impressions | Clicks | CTR | Conversions | ROI
-|
-| ------------ | ----------- | ------ | ---- | ----------- |
----- |
-| Social Media | 1,250,000 | 45,000 | 3.6% | 2,100 | 245% |
-| Email | 500,000 | 35,000 | 7.0% | 1,800 | 320% |
-| Search Ads | 850,000 | 28,000 | 3.3% | 1,400 | 180% |
-| Display | 2,100,000 | 52,000 | 2.5% | 1,900 | 150% |
-| Content | 650,000 | 41,000 | 6.3% | 2,300 | 410% |
+| Campaign     | Impressions | Clicks | CTR  | Conversions | ROI  |
+| ------------ | ----------- | ------ | ---- | ----------- | ---- |
+| Social Media | 1,250,000   | 45,000 | 3.6% | 2,100       | 245% |
+| Email        | 500,000     | 35,000 | 7.0% | 1,800       | 320% |
+| Search Ads   | 850,000     | 28,000 | 3.3% | 1,400       | 180% |
+| Display      | 2,100,000   | 52,000 | 2.5% | 1,900       | 150% |
+| Content      | 650,000     | 41,000 | 6.3% | 2,300       | 410% |
 
 > [!TIP]
-> Content marketing shows the highest ROI. Consider
-> increasing budget allocation.
+> Content marketing shows the highest ROI. Consider increasing budget allocation.
 
 ### Section C: Sales Performance
 
@@ -570,7 +503,6 @@ function calculateGrowth(data) {
         return ((val - data[idx-1]) / data[idx-1] * 100).toFixed(2);
     });
 }
-
 ```
 
 ### Section D: Technical Specifications
@@ -599,8 +531,7 @@ OAuth
 The Fourier transform is defined as:
 
 $$
-\hat{f}(\xi) = \int_{-\infty}^{\infty} f(x) e^{-2\pi i x
-\xi} dx
+\hat{f}(\xi) = \int_{-\infty}^{\infty} f(x) e^{-2\pi i x \xi} dx
 $$
 
 Taylor series expansion:
@@ -609,32 +540,25 @@ $$
 f(x) = \sum_{n=0}^{\infty} \frac{f^{(n)}(a)}{n!}(x-a)^n
 $$
 
-Matrix operations: $\mathbf{A}\mathbf{x} = \mathbf{b}$ where
-$\mathbf{A} \in \mathbb{R}^{m \times n}$.
+Matrix operations: $\mathbf{A}\mathbf{x} = \mathbf{b}$ where $\mathbf{A} \in \mathbb{R}^{m \times n}$.
 
 ## Performance Testing Sections
 
 ### Repeated Content Block 1
 
-This section contains {++new content++} with {--removed
-parts--} and {~~changes~>improvements~~}.
+This section contains {++new content++} with {--removed parts--} and {~~changes~>improvements~~}.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed
-do eiusmod tempor incididunt ut labore et dolore magna
-aliqua[^perf1]. Ut enim ad minim veniam, quis nostrud
-exercitation ullamco laboris.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua[^perf1]. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
 
 - Item with **bold** and *italic*
 - Item with `code` and [link](url)
 - Item with :emoji: and ~~strike~~
 
-[^perf1]: Performance test footnote with extensive content
-including lists, code, and more.
+[^perf1]: Performance test footnote with extensive content including lists, code, and more.
 
 ### Repeated Content Block 2
 
-Mathematical formulas: $E = mc^2$, $a^2 + b^2 = c^2$,
-$\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$
+Mathematical formulas: $E = mc^2$, $a^2 + b^2 = c^2$, $\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$
 
 ```bash
 #!/bin/bash
@@ -642,12 +566,10 @@ for i in {1..100}; do
     echo "Processing item $i"
     ./process.sh "$i"
 done
-
 ```
 
 > [!WARNING]
-> This is a performance testing warning that contains
-> multiple lines and demonstrates
+> This is a performance testing warning that contains multiple lines and demonstrates
 > callout rendering performance with extended content.
 
 ### Repeated Content Block 3
@@ -686,7 +608,6 @@ This comprehensive document has tested:
 ---
 
 **Document Statistics**:
-
 - Sections: 20+
 - Tables: 10+
 - Code blocks: 15+

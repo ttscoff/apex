@@ -170,6 +170,25 @@ add_executable(apex_cli cli/main.c)
 set_target_properties(apex_cli PROPERTIES OUTPUT_NAME apex)
 if(YAML_FOUND)
     target_link_libraries(apex_cli apex_static libcmark-gfm-extensions_static libcmark-gfm_static ${YAML_LIBRARIES})
+    # On macOS, change libyaml library path to use @rpath so it can be found in standard locations
+    # This allows the binary to work when copied to /usr/local/bin without requiring Homebrew
+    if(APPLE)
+        find_program(INSTALL_NAME_TOOL install_name_tool)
+        if(INSTALL_NAME_TOOL)
+            add_custom_command(TARGET apex_cli POST_BUILD
+                # Add rpaths for common libyaml locations
+                COMMAND ${INSTALL_NAME_TOOL} -add_rpath /usr/local/lib $<TARGET_FILE:apex_cli> 2>/dev/null || true
+                COMMAND ${INSTALL_NAME_TOOL} -add_rpath /opt/homebrew/lib $<TARGET_FILE:apex_cli> 2>/dev/null || true
+                # Change libyaml path from absolute to @rpath
+                # Try common Homebrew paths first
+                COMMAND ${INSTALL_NAME_TOOL} -change "/opt/homebrew/opt/libyaml/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $<TARGET_FILE:apex_cli> 2>/dev/null || true
+                COMMAND ${INSTALL_NAME_TOOL} -change "/usr/local/opt/libyaml/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $<TARGET_FILE:apex_cli> 2>/dev/null || true
+                # Handle build-time paths from CI/CD
+                COMMAND ${INSTALL_NAME_TOOL} -change "/Users/runner/work/apex/apex/deps/libyaml-universal/lib/libyaml-0.2.dylib" "@rpath/libyaml-0.2.dylib" $<TARGET_FILE:apex_cli> 2>/dev/null || true
+                COMMENT "Setting up rpaths and changing libyaml to use @rpath"
+            )
+        endif()
+    endif()
 else()
     target_link_libraries(apex_cli apex_static libcmark-gfm-extensions_static libcmark-gfm_static)
 endif()
