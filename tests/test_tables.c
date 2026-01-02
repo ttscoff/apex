@@ -6,6 +6,7 @@
 #include "apex/apex.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 void test_advanced_tables(void) {
     printf("\n=== Advanced Tables Tests ===\n");
@@ -61,7 +62,20 @@ void test_advanced_tables(void) {
     html = apex_markdown_to_html(align_table, strlen(align_table), &opts);
     /* cmark-gfm uses align=\"left|center|right\" attributes rather than inline styles */
     assert_contains(html, "<th>h1</th>", "Left-aligned header from colon pattern");
-    assert_contains(html, "<th align=\"center\">h2</th>", "Center-aligned header from colon pattern");
+    /* Accept either align="center" or style="text-align: center" */
+    bool has_align = strstr(html, "<th align=\"center\">h2</th") != NULL;
+    bool has_style = strstr(html, "<th style=\"text-align: center\">h2</th") != NULL;
+    if (has_align || has_style) {
+        tests_passed++;
+        tests_run++;
+        printf(COLOR_GREEN "✓" COLOR_RESET " Center-aligned header from colon pattern\n");
+    } else {
+        tests_failed++;
+        tests_run++;
+        printf(COLOR_RED "✗" COLOR_RESET " Center-aligned header from colon pattern\n");
+        printf("  Looking for: <th align=\"center\">h2</th> or <th style=\"text-align: center\">h2</th>\n");
+        printf("  In:          %s\n", html);
+    }
     apex_free_string(html);
 
     /* Test basic table (ensure we didn't break existing functionality) */

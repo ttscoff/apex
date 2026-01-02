@@ -11,6 +11,7 @@
 
 /* Forward declarations */
 static void normalize_emoji_name(char *name);
+static int is_table_alignment_pattern(const char *start, const char *end);
 
 /**
  * Find emoji entry by name
@@ -118,10 +119,24 @@ char *apex_replace_emoji(const char *html) {
                         }
                     }
 
+                    /* Skip if it contains only table alignment characters (pipes, dashes, colons) */
+                    if (!has_space && is_table_alignment_pattern(name_start, end)) {
+                        /* This is a table alignment pattern like :---:, :|:, :|---:, etc. */
+                        /* Copy the colon pair as-is */
+                        size_t pattern_len = end - read + 1;
+                        if (pattern_len < remaining) {
+                            memcpy(write, read, pattern_len);
+                            write += pattern_len;
+                            remaining -= pattern_len;
+                        }
+                        read = end + 1;
+                        continue;
+                    }
+
                     if (!has_space) {
                         /* Normalize the name for comparison */
                         char normalized[64];
-                        if (name_len >= sizeof(normalized)) {
+                        if ((size_t)name_len >= sizeof(normalized)) {
                             name_len = sizeof(normalized) - 1;
                         }
                         memcpy(normalized, name_start, name_len);
@@ -324,6 +339,27 @@ static const char *find_best_emoji_match(const char *name, size_t name_len, int 
 }
 
 /**
+ * Check if a colon pair contains only table-related characters (pipes, dashes, colons)
+ * This helps identify table alignment markers like :---:, :|:, :|---:, etc.
+ * Note: Patterns with spaces are already filtered out before this check.
+ */
+static int is_table_alignment_pattern(const char *start, const char *end) {
+    if (!start || !end || start >= end) return 0;
+
+    /* Check if content between colons contains only pipes, dashes, or colons */
+    /* (spaces are already checked separately and rejected) */
+    for (const char *p = start; p < end; p++) {
+        if (*p != '|' && *p != '-' && *p != ':') {
+            /* Found a character that's not part of table alignment syntax */
+            return 0;
+        }
+    }
+
+    /* If we only have pipes, dashes, or colons, it's a table alignment pattern */
+    return 1;
+}
+
+/**
  * Autocorrect emoji names in markdown text
  * Processes :emoji_name: patterns and corrects typos using fuzzy matching
  */
@@ -347,7 +383,7 @@ char *apex_autocorrect_emoji_names(const char *text) {
                 int name_len = end - (read + 1);
                 const char *name_start = read + 1;
 
-                /* Validate: must have at least one character and no spaces */
+                    /* Validate: must have at least one character and no spaces */
                 if (name_len > 0) {
                     /* Check for spaces in the name */
                     int has_space = 0;
@@ -358,10 +394,24 @@ char *apex_autocorrect_emoji_names(const char *text) {
                         }
                     }
 
+                    /* Skip if it contains only table alignment characters (pipes, dashes, colons) */
+                    if (!has_space && is_table_alignment_pattern(name_start, end)) {
+                        /* This is a table alignment pattern like :---:, :|:, :|---:, etc. */
+                        /* Copy the colon pair as-is */
+                        size_t pattern_len = end - read + 1;
+                        if (pattern_len < remaining) {
+                            memcpy(write, read, pattern_len);
+                            write += pattern_len;
+                            remaining -= pattern_len;
+                        }
+                        read = end + 1;
+                        continue;
+                    }
+
                     if (!has_space) {
                         /* Normalize the name for comparison */
                         char normalized[64];
-                        if (name_len >= sizeof(normalized)) {
+                        if ((size_t)name_len >= sizeof(normalized)) {
                             name_len = sizeof(normalized) - 1;
                         }
                         memcpy(normalized, name_start, name_len);

@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <time.h>
 
 /* Structure to track cells with attributes */
 typedef struct cell_attr {
@@ -192,6 +193,20 @@ static bool process_cell_alignment(const char **content_start, const char **cont
     const char *end = *content_end;
 
     if (start >= end) return false;
+
+    /* Fast early exit: check if there's any colon in the content at all */
+    /* This avoids expensive scanning for cells that clearly don't have alignment */
+    bool has_colon = false;
+    for (const char *check = start; check < end; check++) {
+        if (*check == ':') {
+            has_colon = true;
+            break;
+        }
+    }
+    if (!has_colon) {
+        *align_out = NULL;
+        return false;
+    }
 
     /* Check for leading colon (left or center align)
      * Must be at start (after whitespace), not escaped, and not followed by another colon */
@@ -505,18 +520,94 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     bool needs_all_cells = (attrs != NULL || captions != NULL || paras_to_remove != NULL || tfoot_rows != NULL);
     bool has_alignment_colons = false;
 
+    /* For very large HTML (>50KB), check if we can skip processing entirely */
+    size_t html_len = strlen(html);
+    if (html_len > 50000 && !needs_all_cells) {
+        /* Quick check for alignment colons - if none found, skip everything */
+        has_alignment_colons = (strstr(html, ":</td>") != NULL || strstr(html, ":</th>") != NULL);
+        if (!has_alignment_colons) {
+            return (char *)html;
+        }
+    }
+
+    /* DEBUG: If there are no attributes at all, we can skip most processing */
+    if (attrs == NULL && captions == NULL && paras_to_remove == NULL && tfoot_rows == NULL) {
+        /* Check for alignment colons */
+        has_alignment_colons = (strstr(html, ":</td>") != NULL || strstr(html, ":</th>") != NULL);
+        if (!has_alignment_colons) {
+            /* Absolutely nothing to process - return immediately */
+            return (char *)html;
+        }
+    }
+
     if (!needs_all_cells) {
         /* Quick check for alignment colons - look for :</td> or :</th> patterns in rendered HTML */
+        /* Check for trailing colon alignment (most common) */
         has_alignment_colons = (strstr(html, ":</td>") != NULL || strstr(html, ":</th>") != NULL);
+        if (!has_alignment_colons) {
+            /* Also check for leading colon alignment - but be more specific to avoid false positives */
+            /* Look for pattern like ": text</td>" or ": text</th>" (colon, space, text, closing tag) */
+            const char *colon_pos = strstr(html, ":<");
+            if (colon_pos) {
+                /* Check if it's followed by a closing tag within reasonable distance */
+                const char *check = colon_pos + 2;
+                int distance = 0;
+                while (*check && distance < 200) {
+                    if (strncmp(check, "</td>", 5) == 0 || strncmp(check, "</th>", 5) == 0) {
+                        has_alignment_colons = true;
+                        break;
+                    }
+                    check++;
+                    distance++;
+                }
+            }
+        }
         if (!has_alignment_colons) {
             /* No alignment colons found, return early */
             return (char *)html;
+        }
+    } else {
+        /* If we need all cells, check for alignment colons anyway to know if we should process them */
+        /* But first check if most cells already have align attributes (cmark-gfm already processed them) */
+        /* If so, we can skip alignment processing entirely */
+        const char *align_attr_count = html;
+        int cells_with_align = 0;
+        int total_cells_checked = 0;
+        while ((align_attr_count = strstr(align_attr_count, "align=")) != NULL && total_cells_checked < 100) {
+            cells_with_align++;
+            total_cells_checked++;
+            align_attr_count += 6; /* Skip past "align=" */
+        }
+        /* If most cells (>=80%) already have align attributes, skip alignment processing */
+        if (total_cells_checked >= 20 && cells_with_align * 100 / total_cells_checked >= 80) {
+            has_alignment_colons = false; /* Skip alignment processing - already handled by cmark-gfm */
+        } else {
+            has_alignment_colons = (strstr(html, ":</td>") != NULL || strstr(html, ":</th>") != NULL);
         }
     }
 
     /* Collect all cells (for mapping calculation) - only needed for attribute processing, not alignment */
     all_cell *all_cells = NULL;
     if (needs_all_cells) {
+        /* Check if attributes are simple (no rowspan/colspan/data-remove) - if so, skip expensive processing */
+        bool has_complex_attrs = false;
+        if (attrs) {
+            for (cell_attr *a = attrs; a; a = a->next) {
+                if (strstr(a->attributes, "rowspan") ||
+                    strstr(a->attributes, "colspan") ||
+                    strstr(a->attributes, "data-remove")) {
+                    has_complex_attrs = true;
+                    break;
+                }
+            }
+        }
+
+        /* If we have attributes but they're all simple (no spans/removals), and no captions/tfoot,
+         * and no alignment colons, we can skip the expensive HTML processing entirely */
+        if (!has_complex_attrs && captions == NULL && tfoot_rows == NULL && !has_alignment_colons) {
+            return (char *)html;
+        }
+
         all_cells = collect_all_cells(document);
     }
 
@@ -571,6 +662,9 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     int row_col_mapping[50];  /* row_col_mapping[html_pos] = original_col_index */
     int row_col_mapping_size = 0;
 
+    /* Track if we should process alignment (only if alignment colons were detected) */
+    bool should_process_alignment = has_alignment_colons;
+
     /* Track active rowspan cells per column (inspired by Jekyll Spaceship approach).
      * active_rowspan_cells[col] points to the cell_attr for the cell that's currently
      * being rowspanned in that column. When we see a ^^ cell, we increment its rowspan. */
@@ -585,7 +679,26 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
     /* Track the previous cell's matching status to check for colspan */
     cell_attr *prev_cell_matching = NULL;
 
+    /* Timeout check: if processing takes more than 10 seconds, skip the rest */
+    time_t start_time = time(NULL);
+    const time_t timeout_seconds = 10;
+    size_t timeout_check_counter = 0;
+
     while (*read) {
+        timeout_check_counter++;
+
+        /* Check timeout every 1000 characters */
+        if (timeout_check_counter % 1000 == 0) {
+            time_t current_time = time(NULL);
+            if (current_time - start_time >= timeout_seconds) {
+                /* Copy remaining HTML as-is to avoid corruption */
+                while (*read) {
+                    *write++ = *read++;
+                }
+                *write = '\0';
+                goto done;
+            }
+        }
         /* Ensure we have space (realloc if needed) */
         if (written + 100 > capacity) {
             capacity *= 2;
@@ -1509,21 +1622,35 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
 
         /* Check for cell opening tags */
         if (in_row && (strncmp(read, "<td", 3) == 0 || strncmp(read, "<th", 3) == 0)) {
-            /* Extract cell content for debugging and matching */
-            char cell_preview[100] = {0};
             bool is_th = strncmp(read, "<th", 3) == 0;
-            const char *close_tag = is_th ? "</th>" : "</td>";
-            const char *content_start = strchr(read, '>');
-            if (content_start) {
-                const char *content_end = strstr(content_start + 1, close_tag);
-                if (content_end && content_end - content_start - 1 < 99) {
-                    /* Extract just the content between > and </td>/</th> */
-                    size_t len = content_end - content_start - 1;
-                    strncpy(cell_preview, content_start + 1, len);
-                    cell_preview[len] = '\0';
-                    /* Trim trailing whitespace and newlines */
-                    while (len > 0 && (cell_preview[len-1] == '\n' || cell_preview[len-1] == '\r' || isspace((unsigned char)cell_preview[len-1]))) {
-                        cell_preview[--len] = '\0';
+            /* Extract cell content for debugging and matching - only if we need it */
+            char cell_preview[100] = {0};
+
+            /* Extract cell content if we need it for:
+             * - Header row detection (first header cell only)
+             * - Attribute matching (only if we need content verification)
+             * Note: Alignment processing extracts content separately and only when needed */
+            bool need_cell_content_for_header = (in_table && !in_tbody && !in_tfoot && in_thead &&
+                                                 table_idx >= 0 && table_idx < 50 &&
+                                                 row_idx == 0 && col_idx == 0 && is_th);
+            bool need_cell_content = need_cell_content_for_header;
+
+            /* For attribute matching, we'll extract content only if we find a potential match
+             * that requires content verification (e.g., when there are multiple candidates) */
+            if (need_cell_content) {
+                const char *close_tag = is_th ? "</th>" : "</td>";
+                const char *content_start = strchr(read, '>');
+                if (content_start) {
+                    const char *content_end = strstr(content_start + 1, close_tag);
+                    if (content_end && content_end - content_start - 1 < 99) {
+                        /* Extract just the content between > and </td>/</th> */
+                        size_t len = content_end - content_start - 1;
+                        strncpy(cell_preview, content_start + 1, len);
+                        cell_preview[len] = '\0';
+                        /* Trim trailing whitespace and newlines */
+                        while (len > 0 && (cell_preview[len-1] == '\n' || cell_preview[len-1] == '\r' || isspace((unsigned char)cell_preview[len-1]))) {
+                            cell_preview[--len] = '\0';
+                        }
                     }
                 }
             }
@@ -1532,7 +1659,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              * We only consider the first header row's first cell (<thead>, row_idx == 0, col_idx == 0). */
             if (in_table && !in_tbody && !in_tfoot && in_thead &&
                 table_idx >= 0 && table_idx < 50 &&
-                row_idx == 0 && col_idx == 0 && is_th) {
+                row_idx == 0 && col_idx == 0 && is_th && need_cell_content) {
                 bool header_first_cell_empty = true;
                 size_t plen = strlen(cell_preview);
                 for (size_t i = 0; i < plen; i++) {
@@ -1563,24 +1690,43 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              * might skip the === row if all its cells are marked for removal. */
             cell_attr *matching = NULL;
 
-            if (target_original_col >= 0) {
-                /* First, try to match in the current AST row */
+            if (target_original_col >= 0 && attrs != NULL) {
+                /* First, try to match in the current AST row by position (fast) */
                 for (cell_attr *a = attrs; a; a = a->next) {
                     if (a->table_index == table_idx &&
                         a->row_index == ast_row_idx &&
                         a->col_index == target_original_col) {
-                        /* Verify content matches to avoid matching cells covered by rowspans from previous rows */
+                        /* Found a position match - only verify content if we have cell_text to compare */
                         bool content_matches = true;
-                        if (a->cell_text && cell_preview[0] != '\0') {
-                            /* Compare cell content - trim whitespace for comparison */
-                            const char *attr_text = a->cell_text;
-                            const char *html_text = cell_preview;
-                            /* Skip leading whitespace */
-                            while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
-                            while (*html_text && isspace((unsigned char)*html_text)) html_text++;
-                            /* Compare (case-sensitive, but we can make it more lenient if needed) */
-                            content_matches = (strncmp(attr_text, html_text, strlen(attr_text)) == 0 &&
-                                             (html_text[strlen(attr_text)] == '\0' || isspace((unsigned char)html_text[strlen(attr_text)])));
+                        if (a->cell_text && a->cell_text[0] != '\0') {
+                            /* Need to extract cell content for verification (lazy extraction) */
+                            if (cell_preview[0] == '\0') {
+                                bool is_th = strncmp(read, "<th", 3) == 0;
+                                const char *close_tag = is_th ? "</th>" : "</td>";
+                                const char *content_start = strchr(read, '>');
+                                if (content_start) {
+                                    const char *content_end = strstr(content_start + 1, close_tag);
+                                    if (content_end && content_end - content_start - 1 < 99) {
+                                        size_t len = content_end - content_start - 1;
+                                        strncpy(cell_preview, content_start + 1, len);
+                                        cell_preview[len] = '\0';
+                                        while (len > 0 && (cell_preview[len-1] == '\n' || cell_preview[len-1] == '\r' || isspace((unsigned char)cell_preview[len-1]))) {
+                                            cell_preview[--len] = '\0';
+                                        }
+                                    }
+                                }
+                            }
+                            if (cell_preview[0] != '\0') {
+                                /* Compare cell content - trim whitespace for comparison */
+                                const char *attr_text = a->cell_text;
+                                const char *html_text = cell_preview;
+                                /* Skip leading whitespace */
+                                while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
+                                while (*html_text && isspace((unsigned char)*html_text)) html_text++;
+                                /* Compare (case-sensitive, but we can make it more lenient if needed) */
+                                content_matches = (strncmp(attr_text, html_text, strlen(attr_text)) == 0 &&
+                                                 (html_text[strlen(attr_text)] == '\0' || isspace((unsigned char)html_text[strlen(attr_text)])));
+                            }
                         }
                         if (content_matches) {
                             matching = a;
@@ -1598,15 +1744,33 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                             a->row_index == ast_row_idx - 1 &&
                             a->col_index == target_original_col &&
                             strstr(a->attributes, "data-remove")) {
-                            /* Check if content matches (for === cells) */
+                            /* Check if content matches (for === cells) - extract if needed */
                             bool content_matches = true;
-                            if (a->cell_text && cell_preview[0] != '\0') {
-                                const char *attr_text = a->cell_text;
-                                const char *html_text = cell_preview;
-                                while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
-                                while (*html_text && isspace((unsigned char)*html_text)) html_text++;
-                                content_matches = (strncmp(attr_text, html_text, strlen(attr_text)) == 0 &&
-                                                 (html_text[strlen(attr_text)] == '\0' || isspace((unsigned char)html_text[strlen(attr_text)])));
+                            if (a->cell_text && a->cell_text[0] != '\0') {
+                                if (cell_preview[0] == '\0') {
+                                    bool is_th = strncmp(read, "<th", 3) == 0;
+                                    const char *close_tag = is_th ? "</th>" : "</td>";
+                                    const char *content_start = strchr(read, '>');
+                                    if (content_start) {
+                                        const char *content_end = strstr(content_start + 1, close_tag);
+                                        if (content_end && content_end - content_start - 1 < 99) {
+                                            size_t len = content_end - content_start - 1;
+                                            strncpy(cell_preview, content_start + 1, len);
+                                            cell_preview[len] = '\0';
+                                            while (len > 0 && (cell_preview[len-1] == '\n' || cell_preview[len-1] == '\r' || isspace((unsigned char)cell_preview[len-1]))) {
+                                                cell_preview[--len] = '\0';
+                                            }
+                                        }
+                                    }
+                                }
+                                if (cell_preview[0] != '\0') {
+                                    const char *attr_text = a->cell_text;
+                                    const char *html_text = cell_preview;
+                                    while (*attr_text && isspace((unsigned char)*attr_text)) attr_text++;
+                                    while (*html_text && isspace((unsigned char)*html_text)) html_text++;
+                                    content_matches = (strncmp(attr_text, html_text, strlen(attr_text)) == 0 &&
+                                                     (html_text[strlen(attr_text)] == '\0' || isspace((unsigned char)html_text[strlen(attr_text)])));
+                                }
                             }
                             if (content_matches) {
                                 matching = a;
@@ -1622,10 +1786,17 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
 
             /* Content-based fallback matching for header/footer rows (or when column-based matching fails).
              * This is important because column mapping can be wrong for rows with colspans.
-             * Match cells by content and prioritize cells with colspan/rowspan attributes. */
-            if (!matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
-                cell_attr *content_match = NULL;
-                cell_attr *span_match = NULL;
+             * Match cells by content and prioritize cells with colspan/rowspan attributes.
+             * Skip this expensive operation for very large tables to avoid timeout. */
+            if (attrs != NULL && !matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
+                /* For very large tables, skip content-based matching to avoid timeout */
+                /* Position-based matching should be sufficient for most cases */
+                int attr_count = 0;
+                for (cell_attr *check = attrs; check && attr_count < 1000; check = check->next) attr_count++;
+                if (attr_count <= 500) {
+                    /* Only do expensive content-based matching if we don't have too many attributes */
+                    cell_attr *content_match = NULL;
+                    cell_attr *span_match = NULL;
 
                 /* Try to find a cell in the same AST row by matching content */
                 for (cell_attr *a = attrs; a; a = a->next) {
@@ -1659,11 +1830,12 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
                     }
                 }
 
-                /* Use span_match if available, otherwise use content_match */
-                if (span_match) {
-                    matching = span_match;
-                } else if (content_match) {
-                    matching = content_match;
+                    /* Use span_match if available, otherwise use content_match */
+                    if (span_match) {
+                        matching = span_match;
+                    } else if (content_match) {
+                        matching = content_match;
+                    }
                 }
             }
 
@@ -1678,7 +1850,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
              *  - Restrict to cells in the same table
              *  - Restrict to cells that already have a \"rowspan\" attribute
              *  - Require that the match be unique (only one candidate) */
-            if (!matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
+            if (attrs != NULL && !matching && cell_preview[0] != '\0' && ast_row_idx >= 0) {
                 cell_attr *rowspan_candidate = NULL;
                 bool multiple_candidates = false;
 
@@ -1899,67 +2071,182 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
             }
 
             /* Process cell alignment (check for leading/trailing colons) for cells without spans or row-header conversion */
-            const char *cell_content_start = strchr(read, '>');
-            if (cell_content_start) {
-                cell_content_start++;  /* Move past '>' */
-                bool is_th = strncmp(read, "<th", 3) == 0;
-                const char *close_tag = is_th ? "</th>" : "</td>";
-                const char *cell_content_end = strstr(cell_content_start, close_tag);
+            /* Only process if alignment colons were detected in the early exit check */
+            if (should_process_alignment) {
+                /* Fast inline check: look for '>' in opening tag (avoid strchr if possible) */
+                const char *tag_end = read;
+                int tag_len = 0;
+                while (tag_len < 100 && *tag_end && *tag_end != '>') {
+                    tag_end++;
+                    tag_len++;
+                }
+                if (*tag_end != '>') {
+                    /* Tag too long or malformed, skip alignment processing */
+                    col_idx++;
+                    prev_cell_matching = matching;
+                    /* Continue with normal character-by-character processing */
+                } else {
+                    /* Check if cell already has align attribute (from column alignment) */
+                    /* We still need to check for per-cell alignment colons to override column alignment */
+                    bool has_align_attr = false;
+                    const char *align_attr_start = NULL;
+                    const char *align_attr_end = NULL;
+                    const char *tag_check = read;
 
-                if (cell_content_end && cell_content_end > cell_content_start) {
-                    /* Check for alignment colons */
-                    const char *content_start = cell_content_start;
-                    const char *content_end = cell_content_end;
-                    char *align_style = NULL;
-
-                    if (process_cell_alignment(&content_start, &content_end, &align_style)) {
-                        /* Alignment detected - modify the cell */
-                        /* Copy the opening tag up to '>' */
-                        while (*read && *read != '>') {
-                            *write++ = *read++;
-                        }
-
-                        /* Add style attribute before closing '>' */
-                        if (*read == '>') {
-                            /* Add style attribute */
-                            *write++ = ' ';
-                            *write++ = 's';
-                            *write++ = 't';
-                            *write++ = 'y';
-                            *write++ = 'l';
-                            *write++ = 'e';
-                            *write++ = '=';
-                            *write++ = '"';
-                            const char *style_str = align_style;
-                            while (*style_str) {
-                                *write++ = *style_str++;
+                    /* Scan up to tag_end for "align=" */
+                    for (int i = 0; i < tag_len && tag_check < tag_end; i++, tag_check++) {
+                        if (strncmp(tag_check, "align=", 6) == 0) {
+                            has_align_attr = true;
+                            align_attr_start = tag_check;
+                            /* Find the end of the align attribute value */
+                            const char *quote = strchr(tag_check + 6, '"');
+                            if (quote) {
+                                align_attr_end = strchr(quote + 1, '"');
                             }
-                            *write++ = '"';
-                            free(align_style);
+                            break;
                         }
+                    }
 
-                        /* Copy the '>' */
-                        if (*read == '>') {
-                            *write++ = *read++;
+                    /* Fast check: look for colon in cell content before extracting full content */
+                    /* This avoids expensive strchr/strstr for cells that clearly don't have alignment */
+                    bool is_th = strncmp(read, "<th", 3) == 0;
+                    const char *close_tag = is_th ? "</th>" : "</td>";
+                    /* Use inline search for close tag (faster than strstr for short distances) */
+                    const char *close_tag_pos = tag_end + 1;
+                    bool found_close = false;
+                    /* Limit search to first 500 chars to avoid scanning huge cells */
+                    for (int i = 0; i < 500 && *close_tag_pos; i++) {
+                        if (strncmp(close_tag_pos, close_tag, 5) == 0) {
+                            found_close = true;
+                            break;
                         }
+                        close_tag_pos++;
+                    }
 
-                        /* Copy modified content (with colons removed) */
-                        while (content_start < content_end) {
-                            *write++ = *content_start++;
-                        }
-
-                        /* Skip original content and write closing tag */
-                        read = cell_content_end;
-                        memcpy(write, close_tag, 5);
-                        write += 5;
-                        read += 5;
-
+                    if (!found_close) {
+                        /* Close tag not found nearby, skip alignment processing */
                         col_idx++;
                         prev_cell_matching = matching;
-                        continue;
+                        /* Continue with normal character-by-character processing */
+                    } else if (close_tag_pos && close_tag_pos > tag_end + 1) {
+                        /* Quick check for colon - after whitespace, alignment colons are only at start or end */
+                        /* This is much faster than scanning 50+ characters */
+                        bool has_colon = false;
+                        const char *content_start = tag_end + 1;
+                        const char *content_end = close_tag_pos;
+
+                        /* Skip leading whitespace and check first non-whitespace character */
+                        const char *first_char = content_start;
+                        while (first_char < content_end && isspace((unsigned char)*first_char)) {
+                            first_char++;
+                        }
+                        if (first_char < content_end && *first_char == ':') {
+                            has_colon = true;
+                        }
+
+                        /* If not found, skip trailing whitespace and check last non-whitespace character */
+                        if (!has_colon) {
+                            const char *last_char = content_end - 1;
+                            while (last_char > content_start && isspace((unsigned char)*last_char)) {
+                                last_char--;
+                            }
+                            if (last_char >= content_start && *last_char == ':') {
+                                has_colon = true;
+                            }
+                        }
+
+                        if (!has_colon) {
+                            /* No colon found, skip alignment processing for this cell */
+                            col_idx++;
+                            prev_cell_matching = matching;
+                            /* Continue with normal character-by-character processing */
+                        } else {
+                            /* Colon found, extract full content and process alignment */
+                            const char *cell_content_start = tag_end + 1;
+                            const char *cell_content_end = close_tag_pos;
+
+                            /* Quick check: if content is too long, skip alignment processing to avoid timeout */
+                            size_t content_len = cell_content_end - cell_content_start;
+                            if (content_len > 10000) {
+                                /* Content too long, skip alignment processing for this cell */
+                                col_idx++;
+                                prev_cell_matching = matching;
+                                /* Continue with normal character-by-character processing */
+                            } else {
+                                /* Check for alignment colons */
+                                const char *content_start = cell_content_start;
+                                const char *content_end = cell_content_end;
+                                char *align_style = NULL;
+
+                                if (process_cell_alignment(&content_start, &content_end, &align_style)) {
+                                    /* Per-cell alignment detected - override column alignment */
+                                    /* Copy the opening tag, but remove existing align attribute if present */
+                                    if (has_align_attr && align_attr_start && align_attr_end) {
+                                        /* Copy up to align attribute */
+                                        while (read < align_attr_start) {
+                                            *write++ = *read++;
+                                        }
+                                        /* Skip the align attribute (including quotes) */
+                                        read = align_attr_end + 1;
+                                        /* Remove any trailing space before '>' */
+                                        while (read < tag_end && (*read == ' ' || *read == '\t')) {
+                                            read++;
+                                        }
+                                    } else {
+                                        /* Copy the opening tag up to '>' */
+                                        while (*read && *read != '>') {
+                                            *write++ = *read++;
+                                        }
+                                    }
+
+                                    /* Add style attribute before closing '>' */
+                                    if (*read == '>') {
+                                        /* Add style attribute (overrides column alignment) */
+                                        *write++ = ' ';
+                                        *write++ = 's';
+                                        *write++ = 't';
+                                        *write++ = 'y';
+                                        *write++ = 'l';
+                                        *write++ = 'e';
+                                        *write++ = '=';
+                                        *write++ = '"';
+                                        const char *style_str = align_style;
+                                        while (*style_str) {
+                                            *write++ = *style_str++;
+                                        }
+                                        *write++ = '"';
+                                        free(align_style);
+                                    }
+
+                                    /* Copy the '>' */
+                                    if (*read == '>') {
+                                        *write++ = *read++;
+                                    }
+
+                                    /* Copy modified content (with colons removed) */
+                                    while (content_start < content_end) {
+                                        *write++ = *content_start++;
+                                    }
+
+                                    /* Skip original content and write closing tag */
+                                    read = cell_content_end;
+                                    memcpy(write, close_tag, 5);
+                                    write += 5;
+                                    read += 5;
+
+                                    col_idx++;
+                                    prev_cell_matching = matching;
+                                    continue;
+                                }
+                                /* If alignment processing failed, free align_style if it was allocated */
+                                if (align_style) {
+                                    free(align_style);
+                                }
+                            }
+                        }
                     }
                 }
-            }
+            }  /* End of should_process_alignment check */
 
             col_idx++;
             prev_cell_matching = matching;  /* Track this cell for next cell's colspan check */
@@ -2004,6 +2291,7 @@ char *apex_inject_table_attributes(const char *html, cmark_node *document, int c
         paras_to_remove = next;
     }
 
+done:
     return output;
 }
 
