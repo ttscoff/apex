@@ -2,6 +2,21 @@
 
 All notable changes to Apex will be documented in this file.
 
+## [0.1.47] - 2026-01-03
+
+### Changed
+
+- Updated Objective-C API to use mode constants instead of string literals in default implementation
+
+### New
+
+- Added emoji autocorrect option to enable automatic conversion of emoji names like :rocket: to Unicode emoji characters
+- Added progress indicator option to show processing progress on stderr for operations longer than 1 second
+
+### Improved
+
+- Added mode constants (ApexModeCommonmark, ApexModeGFM, etc.) to Objective-C API for better type safety and code clarity
+
 ## [0.1.46] - 2026-01-03
 
 ## [0.1.45] - 2026-01-03
@@ -1946,6 +1961,7 @@ Based on [cmark-gfm](https://github.com/github/cmark-gfm) by GitHub
 
 Developed for [Marked](https://marked2app.com) by Brett Terpstra
 
+[0.1.47]: https://github.com/ttscoff/apex/releases/tag/v0.1.47
 [0.1.46]: https://github.com/ttscoff/apex/releases/tag/v0.1.46
 [0.1.45]: https://github.com/ttscoff/apex/releases/tag/v0.1.45
 [0.1.44]: https://github.com/ttscoff/apex/releases/tag/v0.1.44
