@@ -165,6 +165,12 @@ Enable or disable bracketed spans syntax \f[CR][text]{IAL}\f[R]
 (Pandoc\-style).
 Bracketed spans convert to HTML span elements with attributes.
 Default: enabled in unified mode, disabled in other modes.
+.TP
+\f[B]\(enemoji\-autocorrect\f[R], \f[B]\(enno\-emoji\-autocorrect\f[R]
+Enable or disable emoji name autocorrect.
+When enabled, emoji names like \f[CR]:rocket:\f[R] are automatically
+converted to Unicode emoji characters.
+Default: enabled in unified mode, disabled in other modes.
 .SS Header ID Format
 .TP
 \f[B]\(enid\-format\f[R] \f[I]FORMAT\f[R]
@@ -352,6 +358,12 @@ Uninstall a plugin by ID.
 Removes the plugin directory from the plugins folder.
 Apex will prompt for confirmation before removing the plugin.
 .SS General Options
+.TP
+\f[B]\(enprogress\f[R], \f[B]\(enno\-progress\f[R]
+Show progress indicator during processing.
+Progress is displayed on stderr for operations that take longer than 1
+second.
+Default: enabled when stderr is a TTY, disabled otherwise.
 .TP
 \f[B]\-h\f[R], \f[B]\(enhelp\f[R]
 Show help message and exit.

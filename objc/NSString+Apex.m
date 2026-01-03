@@ -6,6 +6,15 @@
 #import "NSString+Apex.h"
 #import <apex/apex.h>
 
+/**
+ * Apex mode constants
+ */
+NSString * const ApexModeCommonmark = @"commonmark";
+NSString * const ApexModeGFM = @"gfm";
+NSString * const ApexModeMultiMarkdown = @"multimarkdown";
+NSString * const ApexModeKramdown = @"kramdown";
+NSString * const ApexModeUnified = @"unified";
+
 @implementation NSString (Apex)
 
 /**
@@ -31,7 +40,7 @@
  * Convert Markdown to HTML using Apex (unified mode)
  */
 + (NSString *)convertWithApex:(NSString *)inputString {
-    return [self convertWithApex:inputString mode:@"unified"];
+    return [self convertWithApex:inputString mode:ApexModeUnified];
 }
 
 /**
