@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /* Custom node type for metadata blocks */
-extern cmark_node_type APEX_NODE_METADATA;
+/* Note: APEX_NODE_METADATA is defined as an enum value in parser.h, not as a variable */
 
 /**
  * Metadata key-value pair structure

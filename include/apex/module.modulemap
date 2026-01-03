@@ -1,0 +1,16 @@
+module Apex {
+    umbrella header "apex.h"
+    explicit module parser {
+        header "parser.h"
+        export *
+    }
+    explicit module renderer {
+        header "renderer.h"
+        export *
+    }
+    explicit module buffer {
+        header "buffer.h"
+        export *
+    }
+    export *
+}

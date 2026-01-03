@@ -55,6 +55,9 @@ public struct ApexOptions {
     /// Embed local images as base64 data URLs
     public var embedImages: Bool = false
 
+    /// Default initializer
+    public init() {}
+    
     /// Default options
     public static let `default` = ApexOptions()
 

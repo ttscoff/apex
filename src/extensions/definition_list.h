@@ -19,9 +19,7 @@ extern "C" {
 #endif
 
 /* Custom node types for definition lists */
-extern cmark_node_type APEX_NODE_DEFINITION_LIST;
-extern cmark_node_type APEX_NODE_DEFINITION_TERM;
-extern cmark_node_type APEX_NODE_DEFINITION_DATA;
+/* Note: APEX_NODE_DEFINITION_* are defined as enum values in parser.h, not as variables */
 
 /**
  * Process definition lists via preprocessing

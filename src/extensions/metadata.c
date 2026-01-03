@@ -31,7 +31,7 @@
  * This is simpler and matches how MultiMarkdown actually works */
 
 /* Node type for metadata blocks */
-cmark_node_type APEX_NODE_METADATA = CMARK_NODE_CUSTOM_BLOCK;
+/* Note: APEX_NODE_METADATA is defined as an enum in parser.h, not as a variable */
 
 /* Transform structures */
 typedef struct apex_transform {
