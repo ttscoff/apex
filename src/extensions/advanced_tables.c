@@ -701,19 +701,54 @@ static char *attributes_to_html_string(apex_attributes *attrs) {
 }
 
 static bool is_table_caption(cmark_node *para, char **caption_text, const char **original_text_ptr) {
-    if (!para || cmark_node_get_type(para) != CMARK_NODE_PARAGRAPH) return false;
-
-    /* Get first child (should be text) */
-    cmark_node *text_node = cmark_node_first_child(para);
-    if (!text_node || cmark_node_get_type(text_node) != CMARK_NODE_TEXT) return false;
-
-    const char *text = cmark_node_get_literal(text_node);
-    if (!text) return false;
-
-    /* Store original text for IAL extraction */
-    if (original_text_ptr) {
-        *original_text_ptr = text;
+    if (!para || cmark_node_get_type(para) != CMARK_NODE_PARAGRAPH) {
+        return false;
     }
+
+    /* Collect all text from all text nodes in the paragraph */
+    /* This is necessary because IAL might be in a separate text node after whitespace */
+    cmark_node *text_node = cmark_node_first_child(para);
+    if (!text_node) return false;
+
+    /* Build full text by concatenating all text nodes */
+    size_t text_len = 0;
+    cmark_node *node = text_node;
+    while (node) {
+        if (cmark_node_get_type(node) == CMARK_NODE_TEXT) {
+            const char *node_text = cmark_node_get_literal(node);
+            if (node_text) {
+                text_len += strlen(node_text);
+            }
+        }
+        node = cmark_node_next(node);
+    }
+
+    if (text_len == 0) return false;
+
+    /* Allocate buffer for full text */
+    char *full_text = malloc(text_len + 1);
+    if (!full_text) return false;
+    full_text[0] = '\0';
+
+    /* Concatenate all text nodes */
+    node = text_node;
+    while (node) {
+        if (cmark_node_get_type(node) == CMARK_NODE_TEXT) {
+            const char *node_text = cmark_node_get_literal(node);
+            if (node_text) {
+                strcat(full_text, node_text);
+            }
+        }
+        node = cmark_node_next(node);
+    }
+
+    const char *text = full_text;
+
+    /* Store full_text pointer in paragraph user_data so we can free it later */
+    /* We'll free it after add_table_caption uses it */
+    char *existing_data = (char *)cmark_node_get_user_data(para);
+    if (existing_data) free(existing_data);
+    cmark_node_set_user_data(para, full_text); /* Store pointer for later freeing */
 
     /* Check for [Caption] format */
     if (text[0] == '[') {
@@ -740,6 +775,9 @@ static bool is_table_caption(cmark_node *para, char **caption_text, const char *
                     memcpy(*caption_text, text + 1, len);
                     (*caption_text)[len] = '\0';
                 }
+                if (original_text_ptr) {
+                    *original_text_ptr = text;
+                }
                 return true;
             } else if (has_ial) {
                 /* Has IAL after [Caption] */
@@ -748,6 +786,9 @@ static bool is_table_caption(cmark_node *para, char **caption_text, const char *
                 if (*caption_text) {
                     memcpy(*caption_text, text + 1, len);
                     (*caption_text)[len] = '\0';
+                }
+                if (original_text_ptr) {
+                    *original_text_ptr = text;
                 }
                 return true;
             }
@@ -812,14 +853,27 @@ static bool is_table_caption(cmark_node *para, char **caption_text, const char *
                         memcpy(*caption_text, caption_start, len);
                         (*caption_text)[len] = '\0';
                     }
+                    if (original_text_ptr) {
+                        *original_text_ptr = text;
+                    }
                     return true;
                 } else if (ial_start) {
                     /* Caption is empty but has IAL - still valid */
                     *caption_text = strdup("");
+                    if (original_text_ptr) {
+                        *original_text_ptr = text;
+                    }
                     return true;
                 }
             }
         }
+    }
+
+    /* If we got here, no caption format was found - free allocated memory */
+    char *stored_text = (char *)cmark_node_get_user_data(para);
+    if (stored_text == full_text) {
+        free(full_text);
+        cmark_node_set_user_data(para, NULL);
     }
 
     return false;
@@ -932,6 +986,11 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                         const char *original_text = NULL;
                         if (is_table_caption(prev, &caption, &original_text)) {
                             add_table_caption(cur, caption, original_text);
+                            /* Free the allocated full_text that was stored in user_data */
+                            char *stored_text = (char *)cmark_node_get_user_data(prev);
+                            if (stored_text && stored_text == original_text) {
+                                free(stored_text);
+                            }
                             /* Mark caption paragraph for removal so it is not reused */
                             cmark_node_set_user_data(prev, strdup(" data-remove=\"true\""));
                             free(caption);
@@ -949,6 +1008,11 @@ cmark_node *apex_process_advanced_tables(cmark_node *root) {
                         const char *original_text = NULL;
                         if (is_table_caption(next, &caption, &original_text)) {
                             add_table_caption(cur, caption, original_text);
+                            /* Free the allocated full_text that was stored in user_data */
+                            char *stored_text = (char *)cmark_node_get_user_data(next);
+                            if (stored_text && stored_text == original_text) {
+                                free(stored_text);
+                            }
                             /* Mark caption paragraph for removal so it is not reused */
                             cmark_node_set_user_data(next, strdup(" data-remove=\"true\""));
                             free(caption);

@@ -256,7 +256,11 @@ static void collect_nodes_with_attrs_recursive(cmark_node *node, attr_node **lis
     int elem_idx = -1;
     if (type == CMARK_NODE_PARAGRAPH) elem_idx = counters->para_count++;
     else if (type >= CMARK_NODE_HEADING && type <= CMARK_NODE_HEADING + 5) elem_idx = counters->heading_count++;
-    else if (type == CMARK_NODE_TABLE) elem_idx = counters->table_count++;
+    else if (type == CMARK_NODE_TABLE) {
+        /* For tables, increment the counter first, then use (count - 1) as the index */
+        /* This ensures the index matches the HTML renderer's count of <table> tags */
+        elem_idx = counters->table_count++;
+    }
     else if (type == CMARK_NODE_BLOCK_QUOTE) elem_idx = counters->blockquote_count++;
     else if (type == CMARK_NODE_LIST) elem_idx = counters->list_count++;
     else if (type == CMARK_NODE_ITEM) elem_idx = counters->item_count++;
@@ -536,40 +540,54 @@ char *apex_render_html_with_attributes(cmark_node *document, int options) {
                 /* Find matching attribute - try fingerprint first, then index */
                 attr_node *matching = NULL;
                 int idx = 0;
-                for (attr_node *a = attr_list; a; a = a->next, idx++) {
-                    if (used[idx]) continue;
 
-                    /* Check type match (including inline elements) */
-                    bool type_match = (a->node_type == elem_type ||
-                         (elem_type == CMARK_NODE_HEADING && a->node_type >= CMARK_NODE_HEADING && a->node_type <= CMARK_NODE_HEADING + 5));
-
-                    if (!type_match) continue;
-
-                    /* Try fingerprint match first (works for both block and inline) */
-                    if (a->text_fingerprint && fp_idx > 0 &&
-                        strncmp(a->text_fingerprint, html_fingerprint, 50) == 0) {
-                        /* For inline elements, also check element_index to handle duplicates */
-                        if (elem_type == CMARK_NODE_LINK || elem_type == CMARK_NODE_IMAGE ||
-                            elem_type == CMARK_NODE_STRONG || elem_type == CMARK_NODE_EMPH ||
-                            elem_type == CMARK_NODE_CODE) {
-                            if (a->element_index == elem_idx) {
-                                matching = a;
-                                used[idx] = true;
-                                break;
-                            }
-                        } else {
-                            /* For other elements, fingerprint match is sufficient */
+                /* For tables, use sequential matching (first unused table) since index may not match */
+                if (elem_type == CMARK_NODE_TABLE) {
+                    for (attr_node *a = attr_list; a; a = a->next, idx++) {
+                        if (used[idx]) continue;
+                        if (a->node_type == CMARK_NODE_TABLE) {
                             matching = a;
                             used[idx] = true;
                             break;
                         }
                     }
+                } else {
+                    /* For other elements, use the existing matching logic */
+                    for (attr_node *a = attr_list; a; a = a->next, idx++) {
+                        if (used[idx]) continue;
 
-                    /* Fall back to index match if no fingerprint */
-                    if (!a->text_fingerprint && a->element_index == elem_idx) {
-                        matching = a;
-                        used[idx] = true;
-                        break;
+                        /* Check type match (including inline elements) */
+                        bool type_match = (a->node_type == elem_type ||
+                             (elem_type == CMARK_NODE_HEADING && a->node_type >= CMARK_NODE_HEADING && a->node_type <= CMARK_NODE_HEADING + 5));
+
+                        if (!type_match) continue;
+
+                        /* Try fingerprint match first (works for both block and inline) */
+                        if (a->text_fingerprint && fp_idx > 0 &&
+                            strncmp(a->text_fingerprint, html_fingerprint, 50) == 0) {
+                            /* For inline elements, also check element_index to handle duplicates */
+                            if (elem_type == CMARK_NODE_LINK || elem_type == CMARK_NODE_IMAGE ||
+                                elem_type == CMARK_NODE_STRONG || elem_type == CMARK_NODE_EMPH ||
+                                elem_type == CMARK_NODE_CODE) {
+                                if (a->element_index == elem_idx) {
+                                    matching = a;
+                                    used[idx] = true;
+                                    break;
+                                }
+                            } else {
+                                /* For other elements, fingerprint match is sufficient */
+                                matching = a;
+                                used[idx] = true;
+                                break;
+                            }
+                        }
+
+                        /* Fall back to index match if no fingerprint */
+                        if (!a->text_fingerprint && a->element_index == elem_idx) {
+                            matching = a;
+                            used[idx] = true;
+                            break;
+                        }
                     }
                 }
 

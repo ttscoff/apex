@@ -1149,7 +1149,12 @@ static char *apex_preprocess_table_captions(const char *text) {
     const char *read = text;
     char *write = out;
     bool prev_line_was_table_row = false;
+    bool prev_line_was_blank = false;
     bool in_code_block = false;
+    /* Track if we buffered a blank line that should be skipped if next line is a caption */
+    bool buffered_blank_line = false;
+    /* Track if we're in a table section (after a table, across blank lines and captions) */
+    bool in_table_section = false;
 
     while (*read) {
         const char *line_start = read;
@@ -1198,9 +1203,18 @@ static char *apex_preprocess_table_captions(const char *text) {
             } else if (*p == '[') {
                 is_bracket_caption_line = true;
             } else if ((size_t)(line_end - p) >= 6 &&
-                       strncmp(p, "Table:", 6) == 0) {
+                       (strncmp(p, "Table:", 6) == 0 || strncmp(p, "table:", 6) == 0)) {
                 is_pandoc_caption_line = true;
-            } else if (prev_line_was_table_row) {
+            } else if (prev_line_was_table_row || in_table_section) {
+                /* Also check for Table: later in the line (when it appears immediately after a table row) */
+                const char *table_check = p;
+                while (table_check < line_end - 5) {
+                    if (strncmp(table_check, "Table:", 6) == 0 || strncmp(table_check, "table:", 6) == 0) {
+                        is_pandoc_caption_line = true;
+                        break;
+                    }
+                    table_check++;
+                }
                 /* Check for : Caption format (Pandoc-style, only after tables) */
                 /* Skip up to 3 leading spaces (matching definition list rules) */
                 const char *check = p;
@@ -1223,7 +1237,8 @@ static char *apex_preprocess_table_captions(const char *text) {
         if (!in_code_block &&
             prev_line_was_table_row &&
             is_bracket_caption_line) {
-            /* Case 1: [Caption] immediately after table row -> insert blank line */
+            /* Case 1: [Caption] immediately after table row -> ALWAYS insert blank line */
+            /* This prevents the caption from being parsed as part of the table */
             *write++ = '\n';
             memcpy(write, line_start, line_len);
             write += line_len;
@@ -1231,15 +1246,50 @@ static char *apex_preprocess_table_captions(const char *text) {
                 *write++ = '\n';
             }
         } else if (!in_code_block &&
-                   prev_line_was_table_row &&
                    is_pandoc_caption_line) {
-            /* Case 2: Pandoc-style 'Table: Caption' -> convert to '[Caption]' */
-            const char *caption_start = p + 6; /* after 'Table:' */
+            /* Case 2: Pandoc-style 'Table: Caption {#id .class}' -> convert to '[Caption {#id .class}]' */
+            /* Note: We check is_pandoc_caption_line without requiring prev_line_was_table_row
+             * because Table: format is unambiguous and should work even after blank lines.
+             * However, when it appears immediately after a table row (prev_line_was_table_row=true),
+             * we need to ensure the table ends before the caption, so we always insert a blank line. */
+            /* Find where 'Table:' or 'table:' appears in the line (might not be at the start) */
+            const char *table_marker = strstr(line_start, "Table:");
+            if (!table_marker || table_marker >= line_end) {
+                table_marker = strstr(line_start, "table:");
+                if (!table_marker || table_marker >= line_end) {
+                    table_marker = p; /* Fallback to p if not found */
+                }
+            }
+            const char *caption_start = table_marker + 6; /* after 'Table:' or 'table:' */
             while (caption_start < line_end &&
                    (*caption_start == ' ' || *caption_start == '\t')) {
                 caption_start++;
             }
+
+            /* Find end of caption (before IAL if present, or end of line) */
             const char *caption_end = line_end;
+            /* Look for IAL pattern from the end */
+            const char *search = caption_end - 1;
+            while (search >= caption_start) {
+                if (*search == '}') {
+                    /* Found closing brace, look backwards for opening brace */
+                    const char *open = search;
+                    while (open >= caption_start && *open != '{') {
+                        open--;
+                    }
+                    if (open >= caption_start && *open == '{') {
+                        /* Check if it's a valid IAL pattern */
+                        if ((open[1] == ':' || open[1] == '#' || open[1] == '.') &&
+                            search > open) {
+                            caption_end = open; /* Caption ends before IAL */
+                            break;
+                        }
+                    }
+                }
+                search--;
+            }
+
+            /* Trim whitespace from caption */
             while (caption_end > caption_start &&
                    (caption_end[-1] == ' ' || caption_end[-1] == '\t' ||
                     caption_end[-1] == '\r')) {
@@ -1248,11 +1298,45 @@ static char *apex_preprocess_table_captions(const char *text) {
 
             if (caption_end > caption_start) {
                 size_t caption_len = (size_t)(caption_end - caption_start);
+                /* If we buffered a blank line, skip it (don't write it) since caption follows */
+                buffered_blank_line = false; /* Discard the buffered blank line */
+
+                /* If Table: appears in the middle of the line (after table row content),
+                 * write the table row part first, then the caption */
+                if (table_marker > line_start) {
+                    /* Write the table row part (everything before Table:) */
+                    size_t table_part_len = (size_t)(table_marker - line_start);
+                    memcpy(write, line_start, table_part_len);
+                    write += table_part_len;
+                    /* ALWAYS write a newline to close the table row, even if the original line didn't have one */
+                    *write++ = '\n';
+                }
+
+                /* ALWAYS insert blank line to prevent caption from being parsed as table row */
                 *write++ = '\n';      /* blank line between table and caption */
                 *write++ = '[';
                 memcpy(write, caption_start, caption_len);
                 write += caption_len;
                 *write++ = ']';
+                /* Clear table section flag after processing Table: caption */
+                in_table_section = false;
+
+                /* Write IAL if present (from original line, after the bracket) */
+                if (caption_end < line_end) {
+                    /* There's IAL after the caption */
+                    const char *ial_start = caption_end;
+                    while (ial_start < line_end && isspace((unsigned char)*ial_start)) {
+                        ial_start++;
+                    }
+                    if (ial_start < line_end) {
+                        /* Add space before IAL */
+                        *write++ = ' ';
+                        size_t ial_len = (size_t)(line_end - ial_start);
+                        memcpy(write, ial_start, ial_len);
+                        write += ial_len;
+                    }
+                }
+
                 if (has_newline) {
                     *write++ = '\n';
                 }
@@ -1313,7 +1397,9 @@ static char *apex_preprocess_table_captions(const char *text) {
                 caption_end--;
             }
 
-            /* Write blank line, then [Caption] */
+            /* If we buffered a blank line, skip it (don't write it) since caption follows */
+            buffered_blank_line = false; /* Discard the buffered blank line */
+            /* ALWAYS insert blank line to prevent caption from being parsed as table row */
             *write++ = '\n';
             *write++ = '[';
 
@@ -1325,6 +1411,8 @@ static char *apex_preprocess_table_captions(const char *text) {
             }
 
             *write++ = ']';
+            /* Keep in_table_section true after colon caption, in case there's a Table: caption next */
+            in_table_section = true;
 
             /* Write IAL if present (from original line, after the bracket) */
             if (caption_end < line_end) {
@@ -1344,13 +1432,38 @@ static char *apex_preprocess_table_captions(const char *text) {
             if (has_newline) {
                 *write++ = '\n';
             }
+        } else if (!in_code_block && is_blank_line && (prev_line_was_table_row || prev_line_was_blank || in_table_section)) {
+            /* Blank line after table - might be before a caption, so buffer it */
+            /* Also buffer if previous line was blank (chain of blank lines after table) */
+            /* Or if we're in a table section (after processing a caption, still in table context) */
+            /* We'll check the next line to see if it's a caption before writing this blank line */
+            /* Update state to preserve prev_line_was_table_row */
+            prev_line_was_blank = true;
+            /* Mark that we have a buffered blank line */
+            buffered_blank_line = true;
+            /* Keep in_table_section true */
+            in_table_section = true;
+            /* Advance to next line */
+            read = has_newline ? line_end + 1 : line_end;
+            /* Don't write this blank line yet - continue to check next line */
+            continue; /* Skip writing this line for now */
         } else {
             /* Default: copy line unchanged */
+            /* If we buffered a blank line and this isn't a caption, write it now */
+            if (buffered_blank_line &&
+                !is_bracket_caption_line &&
+                !is_pandoc_caption_line &&
+                !is_colon_caption_line) {
+                /* Write the buffered blank line at current position */
+                *write++ = '\n';
+                buffered_blank_line = false;
+            }
             memcpy(write, line_start, line_len);
             write += line_len;
             if (has_newline) {
                 *write++ = '\n';
             }
+            buffered_blank_line = false; /* Clear buffer since we wrote the line */
         }
 
         read = has_newline ? line_end + 1 : line_end;
@@ -1358,12 +1471,25 @@ static char *apex_preprocess_table_captions(const char *text) {
             if (is_table_row_line) {
                 /* Remember that the last non-blank, table-looking line was a row */
                 prev_line_was_table_row = true;
+                prev_line_was_blank = false;
+                in_table_section = true; /* Enter table section */
             } else if (!is_blank_line) {
                 /* Any non-blank, non-table line clears the table-row context */
-                prev_line_was_table_row = false;
+                /* But don't clear in_table_section if we just processed a caption */
+                if (!is_bracket_caption_line && !is_pandoc_caption_line && !is_colon_caption_line) {
+                    prev_line_was_table_row = false;
+                    in_table_section = false; /* Only clear if not a caption */
+                }
+                prev_line_was_blank = false;
+            } else {
+                /* Blank line - preserve prev_line_was_table_row and set prev_line_was_blank */
+                prev_line_was_blank = true;
+                /* Blank lines preserve prev_line_was_table_row so that
+                 * 'Table: Caption' can appear after one or more blank lines.
+                 * Note: prev_line_was_table_row is NOT modified here - it remains
+                 * whatever it was from the previous iteration. */
+                /* Also preserve in_table_section across blank lines */
             }
-            /* Blank lines preserve prev_line_was_table_row so that
-             * 'Table: Caption' can appear after one or more blank lines. */
         }
     }
 
